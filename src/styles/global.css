@@ -1,0 +1,75 @@
+/* 全局兜底样式（错误面板 / 启动提示） */
+.ed-fatal {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f2f3f5;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #222;
+}
+.ed-fatal-card {
+  width: min(640px, 100%);
+  padding: 24px 26px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+  border-top: 4px solid #d4380d;
+}
+.ed-fatal-card h1 {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+.ed-fatal-card p {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #555;
+}
+.ed-fatal-card pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  color: #a8071a;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.ed-fatal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ed-fatal-actions button {
+  padding: 7px 14px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font-size: 13px;
+}
+.ed-fatal-actions button:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+.ed-fatal-hint {
+  margin-top: 14px !important;
+  padding-top: 12px;
+  border-top: 1px dashed #e5e5e5;
+  color: #888 !important;
+  font-size: 12px !important;
+}
+.ed-fatal-hint code {
+  margin: 0 3px;
+  padding: 1px 5px;
+  background: #f0f0f0;
+  border-radius: 3px;
+}

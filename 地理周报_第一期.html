@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>地理时政周刊一</title>
+<style>
+  @page { size: A4 landscape; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Songti SC", "SimSun", "Noto Serif SC", serif;
+    background: #e8e8e8;
+    color: #000;
+    font-size: 9.5px;
+    line-height: 1.5;
+  }
+
+  /* 黑白滤镜 */
+  .page, .page * {
+    filter: grayscale(100%);
+  }
+
+  .print-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #333;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 4px;
+    z-index: 999;
+  }
+
+  .page {
+    width: 297mm;
+    height: 210mm;
+    background: #fff;
+    margin: 10px auto;
+    padding: 10mm 12mm 14mm 12mm;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+
+  /* 页眉 */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #000;
+    padding-bottom: 5px;
+    margin-bottom: 8px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .logo-box {
+    width: 50px;
+    height: 30px;
+    border: 1px dashed #999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7px;
+    color: #999;
+  }
+  .header-title {
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 3px;
+  }
+  .header-title span {
+    font-size: 9px;
+    font-weight: normal;
+    font-style: italic;
+    color: #666;
+    letter-spacing: 1px;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 8.5px;
+    color: #333;
+  }
+  .header-right .issue {
+    font-weight: bold;
+    font-size: 10px;
+  }
+
+  /* 报头 */
+  .masthead {
+    background: #1a1a1a;
+    color: #fff;
+    padding: 14px 24px;
+    margin-bottom: 10px;
+    position: relative;
+  }
+  .masthead::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 2px;
+    background: #fff;
+  }
+  .masthead .kicker {
+    font-size: 9px;
+    color: #ccc;
+    letter-spacing: 4px;
+    margin-bottom: 3px;
+  }
+  .masthead h1 {
+    font-size: 28px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    line-height: 1.1;
+    margin-bottom: 4px;
+  }
+  .masthead .sub {
+    font-size: 9px;
+    color: #999;
+    letter-spacing: 4px;
+  }
+
+  /* 两栏 */
+  .content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  /* 章节标题 */
+  .section {
+    margin-bottom: 8px;
+  }
+  .section-title {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #999;
+  }
+  .section-title .num {
+    font-size: 10px;
+    font-weight: bold;
+    background: #000;
+    color: #fff;
+    padding: 1px 6px;
+    margin-right: 6px;
+  }
+  .section-title h2 {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 1px;
+  }
+
+  h3 {
+    font-size: 10px;
+    font-weight: bold;
+    margin: 4px 0 2px 0;
+  }
+
+  p {
+    font-size: 9px;
+    line-height: 1.55;
+    margin-bottom: 2px;
+  }
+  .label { font-weight: bold; }
+
+  /* 提示框 */
+  .note {
+    background: #f0f0f0;
+    border-left: 3px solid #000;
+    padding: 5px 8px;
+    margin: 3px 0;
+    font-size: 8.5px;
+    line-height: 1.5;
+  }
+
+  /* 概念框 */
+  .concept-box {
+    background: #f5f5f5;
+    padding: 3px 6px;
+    margin-bottom: 2px;
+    font-size: 8.5px;
+    line-height: 1.4;
+    border-left: 2px solid #999;
+  }
+  .concept-box .name { font-weight: bold; }
+
+  /* 逻辑链 */
+  .chain {
+    font-size: 8.5px;
+    line-height: 1.6;
+    padding: 4px 8px;
+    background: #fafafa;
+    margin: 3px 0;
+    border: 1px solid #ddd;
+  }
+  .chain .tag { font-weight: bold; }
+  .chain .arrow { color: #666; font-weight: bold; }
+
+  /* 易错坑 */
+  .trap {
+    font-size: 9px;
+    line-height: 1.5;
+    margin-bottom: 2px;
+    padding-left: 4px;
+  }
+  .trap .x { font-weight: bold; margin-right: 4px; }
+  .trap .t { font-weight: bold; }
+
+  /* 答题模板框 */
+  .tpl {
+    border: 2px solid #000;
+    padding: 6px 10px;
+    margin-bottom: 5px;
+  }
+  .tpl h4 {
+    font-size: 10px;
+    font-weight: bold;
+    margin-bottom: 3px;
+  }
+  .tpl p {
+    font-size: 8.5px;
+    line-height: 1.5;
+    margin-bottom: 3px;
+  }
+  .tpl .label { font-weight: bold; }
+
+  /* 习题 */
+  .quiz {
+    background: #f5f5f5;
+    padding: 5px 8px;
+    margin: 3px 0;
+    font-size: 8.5px;
+    line-height: 1.5;
+  }
+  .quiz .ans { font-weight: bold; }
+  .quiz .exp { color: #555; font-size: 8px; }
+
+  /* 学习要求 */
+  .req {
+    font-size: 9px;
+    line-height: 1.6;
+    padding-left: 2px;
+  }
+
+  /* 配图预留 */
+  .img-ph {
+    background: #f0f0f0;
+    height: 50px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    font-size: 8px;
+    border: 1px dashed #999;
+    margin: 4px 0;
+  }
+  .img-ph .title { font-weight: bold; }
+
+  /* 页脚 */
+  .footer {
+    position: absolute;
+    bottom: 8mm;
+    left: 12mm;
+    right: 12mm;
+    padding-top: 4px;
+    border-top: 1px solid #000;
+  }
+  .footer-top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5px;
+    color: #333;
+    margin-bottom: 2px;
+  }
+  .footer-bottom {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+    color: #666;
+  }
+  .footer-bottom .center {
+    font-weight: bold;
+  }
+
+  /* 姓名学号栏 */
+  .name-row {
+    display: flex;
+    gap: 20px;
+    font-size: 9px;
+    margin-top: 4px;
+  }
+  .name-row span {
+    border-bottom: 1px solid #000;
+    min-width: 80px;
+    display: inline-block;
+  }
+
+  @media print {
+    body { background: #fff; }
+    .print-btn { display: none; }
+    .page {
+      margin: 0;
+      box-shadow: none;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+  }
+</style>
+</head>
+<body>
+
+<button class="print-btn" onclick="window.print()">🖨 打印 / 导出 PDF</button>
+
+<!-- ========== 第 1 页 ========== -->
+<div class="page">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="logo-box">LOGO</div>
+      <div class="header-title">地理时政周刊 <span>GEO WEEKLY</span></div>
+    </div>
+    <div class="header-right">
+      <div class="issue">第一期</div>
+      <div>2026.10.25</div>
+    </div>
+  </div>
+
+  <div class="masthead">
+    <div class="kicker">期刊一</div>
+    <h1>超强厄尔尼诺已经形成</h1>
+    <div class="sub">海 — 气 相 互 作 用 &nbsp;·&nbsp; 全 球 气 候 异 常 &nbsp;·&nbsp; 高 考 必 考</div>
+  </div>
+
+  <div class="content">
+
+    <!-- 左栏 -->
+    <div>
+
+      <!-- 一、教材定位 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">一</span>
+          <h2>教材定位（湘教版高考溯源）</h2>
+        </div>
+        <p><span class="label">对接教材：</span>湘教版选择性必修1 第四章第三节《海—气相互作用》</p>
+        <p><span class="label">内容：</span>教材本源 + 高考考纲 + 必背知识点 + 独立答题模板 + 高考配套习题</p>
+        <div class="note">
+          <strong>本节核心考点：</strong>海—气相互作用与全球气候异常。海洋与大气之间持续进行热量、水汽、能量交换；赤道太平洋海温异常波动，会改变沃克环流，引发全球大气环流紊乱，产生连锁式气候、水文、生态灾害。
+        </div>
+        <h3>教材核心定义</h3>
+        <div class="concept-box"><span class="name">厄尔尼诺：</span>赤道中东太平洋表层海水异常升温，周期 2—7 年。根源为东南信风减弱。</div>
+        <div class="concept-box"><span class="name">拉尼娜：</span>赤道中东太平洋表层海水异常降温，为反向海气异常现象。</div>
+        <div class="concept-box"><span class="name">正常沃克环流：</span>西太平洋暖、上升气流、多雨；东太平洋冷、下沉气流、少雨干旱。</div>
+      </div>
+
+      <!-- 二、高考考纲 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">二</span>
+          <h2>高考考纲 &amp; 命题能力要求</h2>
+        </div>
+        <p><span class="label">核心素养：</span>综合思维（海气耦合机制）、区域认知（全球气候联动差异）</p>
+        <h3>必考能力</h3>
+        <p>① 判读海温距平图、沃克环流示意图</p>
+        <p>② 完整推导厄尔尼诺、拉尼娜成因逻辑链</p>
+        <p>③ 精准推演太平洋两岸、我国气候、渔场、台风变化</p>
+        <p>④ 区分两类海气异常的不同影响，杜绝混淆</p>
+        <h3>高考命题趋势</h3>
+        <p>以年度极端天气、全球气候异常时政切入，重因果、重逻辑、重整体性，极少纯概念默写。</p>
+      </div>
+
+      <!-- 三、厄尔尼诺必背 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">三</span>
+          <h2>厄尔尼诺 · 必背主干知识</h2>
+        </div>
+        <h3>1. 定义与判定</h3>
+        <p>赤道中东太平洋海区，表层海水持续异常增温。</p>
+        <p><span class="label">判定标准：</span>海温距平 ≥ +0.5℃，连续多月持续，即为厄尔尼诺事件。周期 2—7 年。</p>
+        <h3>2. 形成机理（必背逻辑链）</h3>
+        <div class="chain">
+          东南信风减弱<span class="arrow">→</span>南赤道暖流减弱、赤道逆流增强<span class="arrow">→</span>西太平洋暖水向东堆积<span class="arrow">→</span>中东太平洋暖水增多<span class="arrow">→</span>沿岸上升补偿流减弱、冷水上泛减少<span class="arrow">→</span>海温异常升高<span class="arrow">→</span>太平洋东西温差减小<span class="arrow">→</span>沃克环流减弱甚至反转
+        </div>
+        <h3>3. 全球气候与生态影响</h3>
+        <p><span class="label">太平洋东岸（秘鲁、厄瓜多尔）：</span>海温升高，气流上升，降水激增，暴雨、洪涝多发；上升流大幅减弱，营养盐匮乏，秘鲁渔场严重减产。</p>
+        <p><span class="label">太平洋西岸（印尼、澳大利亚、东南亚）：</span>海温相对降低，上升气流减弱，盛行下沉气流，持续干旱、森林火灾频发。</p>
+        <h3>4. 对我国气候高考高频影响</h3>
+        <p>当年冬季：冬季风偏弱，全国易出现暖冬。</p>
+        <p>次年夏季：西太平洋副高偏强、偏南；夏季风偏弱；雨带长期滞留南方 → 南涝北旱；西北太平洋海温偏低 → 台风生成数量偏少。</p>
+      </div>
+
+    </div>
+
+    <!-- 右栏 -->
+    <div>
+
+      <!-- 四、拉尼娜必背 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">四</span>
+          <h2>拉尼娜 · 必背主干知识</h2>
+        </div>
+        <h3>1. 定义与判定</h3>
+        <p>赤道中东太平洋海区，表层海水持续异常降温。</p>
+        <p><span class="label">判定标准：</span>海温距平 ≤ −0.5℃，持续数月，常尾随厄尔尼诺出现。</p>
+        <h3>2. 形成机理（必背逻辑链）</h3>
+        <div class="chain">
+          东南信风异常增强<span class="arrow">→</span>南赤道暖流增强<span class="arrow">→</span>暖海水大量向西太平洋输送<span class="arrow">→</span>中东太平洋暖水流失<span class="arrow">→</span>沿岸上升补偿流大幅增强、底层冷水大量上泛<span class="arrow">→</span>海温异常偏低<span class="arrow">→</span>太平洋东西温差加大<span class="arrow">→</span>沃克环流显著增强
+        </div>
+        <h3>3. 全球气候与生态影响</h3>
+        <p><span class="label">太平洋东岸（秘鲁沿岸）：</span>海温偏低，下沉气流增强，气候异常干旱；上升流强盛，营养盐丰富，秘鲁渔场增产。</p>
+        <p><span class="label">太平洋西岸（澳洲、印尼、东南亚）：</span>海温偏高，对流旺盛，降水偏多、洪涝灾害多发。</p>
+        <h3>4. 对我国气候高考高频影响</h3>
+        <p>当年冬季：冬季风强劲、寒潮频发，易出现冷冬。</p>
+        <p>次年夏季：副高偏北、夏季风偏强，雨带北移迅速 → 南旱北涝；西北太平洋海温偏高，热力条件充足 → 台风数量偏多、登陆偏多。</p>
+      </div>
+
+      <!-- 五、易错坑 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">五</span>
+          <h2>高考重难点 + 高频易错坑</h2>
+        </div>
+        <div class="trap"><span class="x">✕</span><span class="t">厄尔尼诺仅中东太平洋升温，西太平洋降温，并非全球变暖。</span></div>
+        <div class="trap"><span class="x">✕</span><span class="t">气候异常均为概率趋势，答题必须用"易出现、大概率"，不可写绝对化表述。</span></div>
+        <div class="trap"><span class="x">✕</span><span class="t">渔场变化核心原因是营养盐变化，不是单纯水温高低。</span></div>
+        <div class="trap"><span class="x">✕</span><span class="t">我国旱涝灾害多出现于事件次年夏季，切忌时间错位。</span></div>
+      </div>
+
+      <!-- 配图预留 -->
+      <div class="img-ph">
+        <div class="title">图 · 沃克环流示意图</div>
+        <div>正常 / 厄尔尼诺 / 拉尼娜 三图对比</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-top">
+      <span>尺幅千里，卷纳乾坤</span>
+      <span class="center">— 1 / 2 —</span>
+      <span>思接寰宇，笔绘山河</span>
+    </div>
+    <div class="footer-bottom">
+      <span>地理限时训练</span>
+      <span>使用日期：2026年10月26日</span>
+      <span>编辑：曹明环</span>
+      <span>核对：何文静</span>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 第 2 页 ========== -->
+<div class="page">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="logo-box">LOGO</div>
+      <div class="header-title">地理时政周刊 <span>GEO WEEKLY</span></div>
+    </div>
+    <div class="header-right">
+      <div class="issue">第一期</div>
+      <div>2026.10.25</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- 左栏 -->
+    <div>
+
+      <!-- 六、答题模板 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">六</span>
+          <h2>高考标准答题模板（完全分开、独立背诵）</h2>
+        </div>
+        <div class="tpl">
+          <h4>【厄尔尼诺专属答题模板】</h4>
+          <p><span class="label">成因模板：</span>东南信风减弱，西太平洋暖海水向东输送，赤道中东太平洋海水异常增温；沿岸上升补偿流减弱，沃克环流减弱甚至反转，形成厄尔尼诺现象。</p>
+          <p><span class="label">秘鲁渔场减产模板：</span>厄尔尼诺发生，东南信风减弱，秘鲁沿岸上升补偿流减弱，海底营养盐上泛减少，浮游生物不足，鱼类饵料匮乏；海水升温，不适宜冷水鱼类生存，渔业大幅减产。</p>
+          <p><span class="label">对我国气候影响模板：</span>厄尔尼诺年份，我国冬季风偏弱，易出现暖冬；次年夏季西太平洋副高偏南偏弱，夏季风势力弱，雨带滞留南方，形成南涝北旱；西北太平洋海温偏低，台风生成数量偏少。</p>
+        </div>
+        <div class="tpl">
+          <h4>【拉尼娜专属答题模板】</h4>
+          <p><span class="label">成因模板：</span>东南信风异常增强，暖海水向西输送，赤道中东太平洋暖水流失，上升补偿流增强、冷水大量上泛，海温异常偏低，沃克环流显著增强，形成拉尼娜现象。</p>
+          <p><span class="label">秘鲁渔场增产模板：</span>拉尼娜发生，东南信风增强，秘鲁沿岸上升补偿流增强，海底营养盐大量上泛，浮游生物繁盛，鱼类饵料充足，利于冷水鱼生存，渔业增产。</p>
+          <p><span class="label">对我国气候影响模板：</span>拉尼娜年份，冬季风偏强，寒潮多发，我国易出现冷冬；次年夏季副高偏北、夏季风偏强，雨带北移快，我国易出现南旱北涝；西北太平洋海温偏高，台风多发。</p>
+        </div>
+      </div>
+
+      <!-- 七、时政衔接 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">七</span>
+          <h2>时政高考衔接（周刊总结升华）</h2>
+        </div>
+        <div class="note">
+          厄尔尼诺、拉尼娜是海—气相互作用、地理整体性最核心的时政载体。局部海域海温微小异常，通过大气环流遥相关，引发全球各大洲旱涝、冷暖、渔业、台风连锁变化，是新高考综合思维必考热点。
+        </div>
+      </div>
+
+      <!-- 本期学习要求 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">八</span>
+          <h2>本期学习要求</h2>
+        </div>
+        <div class="req">1. 熟练背诵两套独立答题模板，不混淆、不混用；</div>
+        <div class="req">2. 能够手绘正常、厄尔尼诺、拉尼娜三种沃克环流图；</div>
+        <div class="req">3. 掌握"海气相互作用→环流变化→气候灾害"完整因果链。</div>
+      </div>
+
+      <!-- 姓名学号 -->
+      <div class="name-row">
+        <span>姓名：</span>
+        <span>学号：</span>
+      </div>
+
+    </div>
+
+    <!-- 右栏 -->
+    <div>
+
+      <!-- 八、配套习题 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">九</span>
+          <h2>配套高考真题变式习题（含标准答案）</h2>
+        </div>
+
+        <h3>一、选择题</h3>
+        <div class="quiz">
+          <p><strong>1. 厄尔尼诺现象发生期间，赤道太平洋区域正确的是（  ）</strong></p>
+          <p>A. 东南信风增强，沃克环流加强<br>
+             B. 秘鲁沿岸上升流减弱，渔业减产<br>
+             C. 澳大利亚北部降水增多<br>
+             D. 中东太平洋海水持续变冷</p>
+          <p><span class="ans">答案：B</span> <span class="exp">解析：厄尔尼诺信风减弱、沃克环流减弱；澳洲干旱；中东太平洋升温。</span></p>
+        </div>
+        <div class="quiz">
+          <p><strong>2. 拉尼娜事件发生年份，地理现象正确的是（  ）</strong></p>
+          <p>A. 我国冬季多暖冬<br>
+             B. 西北太平洋台风偏少<br>
+             C. 秘鲁渔场增产<br>
+             D. 我国次年夏季南涝北旱</p>
+          <p><span class="ans">答案：C</span> <span class="exp">解析：拉尼娜冷冬、台风偏多、次年南旱北涝、秘鲁渔获增产。</span></p>
+        </div>
+
+        <h3>二、综合大题（高考 8+6+6 分标准题型）</h3>
+        <div class="quiz">
+          <p>阅读材料，完成问题：</p>
+          <p>沃克环流是赤道太平洋纬向热力环流，海温异常会引发厄尔尼诺、拉尼娜现象，深刻影响全球气候与海洋生态。</p>
+          <p><strong>（1）简述厄尔尼诺现象的形成机制。（6 分）</strong></p>
+          <p><span class="ans">标准答案：</span>东南信风减弱，西太平洋暖水向东迁移（2 分）；赤道中东太平洋上升补偿流减弱，冷水上泛减少，海水异常增温（2 分）；太平洋东西热力差异减小，沃克环流减弱甚至反转，形成厄尔尼诺现象（2 分）。</p>
+          <p><strong>（2）分析厄尔尼诺导致秘鲁渔场减产的原因。（6 分）</strong></p>
+          <p><span class="ans">标准答案：</span>东南信风减弱，沿岸上升流减弱，海底营养盐类上泛减少（2 分）；浮游生物数量减少，鱼类饵料不足（2 分）；海水温度异常升高，冷水鱼类生存环境被破坏，鱼类大量死亡，渔场减产（2 分）。</p>
+          <p><strong>（3）说明厄尔尼诺次年夏季我国东部的旱涝格局及成因。（8 分）</strong></p>
+          <p><span class="ans">标准答案：</span>格局：整体呈现南涝北旱（2 分）。成因：厄尔尼诺次年，西太平洋副热带高压位置偏南、势力偏强（2 分）；我国夏季风偏弱，锋面雨带北上速度慢、滞留南方时间长（2 分）；南方降水偏多易涝，北方雨季短、降水偏少易旱（2 分）。</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-top">
+      <span>尺幅千里，卷纳乾坤</span>
+      <span class="center">— 2 / 2 —</span>
+      <span>思接寰宇，笔绘山河</span>
+    </div>
+    <div class="footer-bottom">
+      <span>地理限时训练</span>
+      <span>使用日期：2026年10月26日</span>
+      <span>编辑：曹明环</span>
+      <span>核对：何文静</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

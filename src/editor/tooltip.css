@@ -1,0 +1,99 @@
+/* WPS 风格悬浮提示（全局 data-tip）——由 Editor.tsx 的全局监听器驱动 */
+.ed-tip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 280px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  background: #2b2f38;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  white-space: normal;
+  width: max-content;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+
+.ed-tip.is-show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ed-tip b {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.ed-tip .kbd {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 17px;
+  color: #ffd9a0;
+}
+
+/* 两侧功能栏：可收缩（默认展开） */
+.ed-side {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+
+.ed-side .ed-palette,
+.ed-side .ed-inspector {
+  overflow: hidden;
+  transition: width 0.18s ease, opacity 0.18s ease;
+}
+
+.ed-side.is-collapsed .ed-palette,
+.ed-side.is-collapsed .ed-inspector {
+  width: 0 !important;
+  min-width: 0 !important;
+  opacity: 0;
+  border: 0;
+  pointer-events: none;
+}
+
+.ed-side-toggle {
+  position: absolute;
+  top: 46px;
+  z-index: 30;
+  width: 15px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d7dbe4;
+  background: #f3f5f9;
+  color: #66708a;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ed-side-left .ed-side-toggle {
+  right: -15px;
+  border-radius: 0 7px 7px 0;
+  border-left: 0;
+}
+
+.ed-side-right .ed-side-toggle {
+  left: -15px;
+  border-radius: 7px 0 0 7px;
+  border-right: 0;
+}
+
+.ed-side-toggle:hover {
+  background: #e8eefc;
+  color: #2b62e0;
+  border-color: #b9c9f2;
+}

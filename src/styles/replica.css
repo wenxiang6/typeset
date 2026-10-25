@@ -1,0 +1,348 @@
+/* ============================================================
+   地理时政周刊一 — 1:1 版式复刻
+   坐标基准：参考截图像素（页面白纸区域左上角 = 原点）
+   纸张：8开 横向 370mm × 260mm（= 两个 16开页）
+   ============================================================ */
+
+:root {
+  /* 画布（= 截图中白纸区域的像素尺寸，1:1） */
+  --sheet-w: 2393px;
+  --sheet-h: 1689px;
+
+  /* 字体（原文档：中文黑体；页眉页脚/姓名框西文 Times，正文西文随黑体） */
+  --font-song: "Lantinghei SC", "PingFang SC", "Heiti SC", "SimHei", "Microsoft YaHei", sans-serif;
+  --font-hei: "Lantinghei SC", "PingFang SC", "Heiti SC", "SimHei", "Microsoft YaHei", sans-serif;
+  --font-meta: "Times New Roman", "Lantinghei SC", "PingFang SC", "Heiti SC", "SimHei", serif;
+
+  /* 颜色（自截图采样） */
+  --c-black: #000000;
+  --c-gray: #808080;          /* 页眉/页脚 */
+  --c-red-title: #ff0000;     /* 主标题 */
+  --c-red-school: #d40017;    /* 校名 */
+  --c-blue: #0d72ff;          /* 自动编号 / 圆点 */
+  --c-mark: #cccccc;          /* 角标 */
+
+  /* 字号（参考像素） */
+  --fs-body: 25.4px;          /* 11pt 正文 */
+  --fs-h2: 36.9px;            /* 16pt 一、二、 */
+  --fs-h3: 34.6px;            /* 15pt 1. 2. 3. 小节 */
+  --fs-issue: 36.9px;         /* 16pt 期刊一 */
+  --fs-title: 46.2px;         /* 20pt 主标题 */
+  --fs-meta: 24.2px;          /* 10.5pt 页眉 */
+  --fs-footer: 20.5px;        /* 9pt 页脚 */
+
+  /* 行距 / 段距（参考像素；段前用 padding、段后用 margin，避免外边距折叠） */
+  --lh-body: 44px;
+  --sb-para: 7px;             /* 段前 */
+  --sa-para: 6px;             /* 段后 */
+  --sb-h2: 44px;
+  --sa-h2: 19px;
+  --sb-h3: 43px;
+  --sa-h3: 18px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+.viewer {
+  background: #ececec;
+  font-family: var(--font-song);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ---------- 缩放容器：把 2393px 宽的版面缩放适配窗口 ---------- */
+.viewer {
+  width: 100%;
+  overflow: auto;
+  padding: 24px 0;
+}
+
+.sheet-wrap {
+  transform-origin: top center;
+  margin: 0 auto;
+}
+
+/* ---------- 纸张 ---------- */
+.sheet {
+  position: relative;
+  width: var(--sheet-w);
+  height: var(--sheet-h);
+  background: #fff;
+  color: var(--c-black);
+  overflow: hidden;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.18);
+}
+
+.sheet + .sheet { margin-top: 28px; }
+
+/* ---------- 角标 / 点阵装饰 ---------- */
+.corner {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  pointer-events: none;
+}
+.corner i {
+  position: absolute;
+  background: var(--c-mark);
+}
+/* 竖臂 2px 宽，横臂 2px 高 */
+.corner .v { top: 0; bottom: 0; width: 2px; }
+.corner .h { left: 0; right: 0; height: 2px; }
+
+/* 左上：横臂在下、竖臂在右（「┘」） */
+.corner.tl { left: 108px; top: 42px; }
+.corner.tl .v { right: 0; }
+.corner.tl .h { bottom: 0; }
+
+/* 右上：横臂在下、竖臂在左（「└」） */
+.corner.tr { left: 2309px; top: 42px; }
+.corner.tr .v { left: 0; }
+.corner.tr .h { bottom: 0; }
+
+/* 左下：横臂在上、竖臂在右（「┐」） */
+.corner.bl { left: 108px; top: 1605px; }
+.corner.bl .v { right: 0; }
+.corner.bl .h { top: 0; }
+
+/* 右下：横臂在上、竖臂在左（「┌」） */
+.corner.br { left: 2309px; top: 1605px; }
+.corner.br .v { left: 0; }
+.corner.br .h { top: 0; }
+
+/* 左上角点阵：2 列 × 3 行 */
+.dots {
+  position: absolute;
+  left: 75px;
+  top: 96px;
+  width: 16px;
+  height: 28px;
+}
+.dots i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #757575;
+}
+
+/* ---------- 页眉 ---------- */
+.header-rule {
+  position: absolute;
+  left: 149px;
+  top: 93px;
+  width: 2160px;
+  height: 2px;
+  background: var(--c-black);
+}
+
+.school {
+  position: absolute;
+  left: 156px;
+  top: 45px;
+  width: 260px;
+  height: 44px;
+}
+.school-logo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+}
+.school-logo.placeholder {
+  border: 2px dashed var(--c-red-school);
+  border-radius: 50%;
+}
+.school-cn {
+  position: absolute;
+  left: 43px;
+  top: 0;
+  font-family: var(--font-song);
+  font-weight: 700;
+  font-size: 22.5px;
+  line-height: 1;
+  color: var(--c-red-school);
+  white-space: nowrap;
+}
+.school-en {
+  position: absolute;
+  left: 0;
+  top: 26px;
+  font-family: var(--font-hei);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--c-red-school);
+  letter-spacing: 0.24px;
+  white-space: nowrap;
+}
+
+.meta {
+  position: absolute;
+  top: 65px;
+  font-family: var(--font-meta);
+  font-size: var(--fs-meta);
+  line-height: 1;
+  color: var(--c-gray);
+  white-space: nowrap;
+}
+.meta.train { left: 472px; }
+.meta.date { left: 741px; }
+.meta.editor { left: 1747px; }
+.meta.checker { left: 2051px; }
+
+/* ---------- 标题区（仅第 1 页） ---------- */
+.main-title {
+  position: absolute;
+  left: 0;
+  top: 118px;
+  width: 975px;               /* 使文字中心落在 x=487.5 */
+  text-align: center;
+  font-family: var(--font-hei);
+  font-weight: 700;
+  font-size: var(--fs-title);
+  line-height: 1;
+  color: var(--c-red-title);
+}
+
+.name-box {
+  position: absolute;
+  left: 819px;
+  top: 115px;
+  width: 247px;
+  height: 104px;
+  border: 3px solid var(--c-black);
+  padding: 12px 0 0 17px;
+}
+.name-line {
+  font-family: var(--font-meta);
+  font-size: var(--fs-body);
+  line-height: 36px;
+  display: flex;
+  align-items: baseline;
+}
+.name-line .fill {
+  display: inline-block;
+  width: 116px;
+  margin-left: 20px;
+  border-bottom: 2px solid var(--c-black);
+}
+
+/* 双线装饰（外细框 + 内粗框） */
+.double-rule {
+  position: absolute;
+  left: 176px;
+  top: 222px;
+  width: 913px;
+  height: 24px;
+  border: 2px solid var(--c-black);
+}
+.double-rule::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 2px;
+  bottom: 2px;
+  border: 6px solid var(--c-black);
+}
+
+/* ---------- 版心（每页一栏） ---------- */
+.page-body {
+  position: absolute;
+  width: 1052px;
+}
+
+/* 段落类 */
+.blk { font-family: var(--font-song); font-size: var(--fs-body); line-height: var(--lh-body); }
+
+.p { padding-top: var(--sb-para); margin-bottom: var(--sa-para); text-align: justify; }
+
+.note-line { padding-top: var(--sb-para); margin-bottom: var(--sa-para); text-align: justify; }
+
+.issue-title {
+  margin: 0 0 22px;
+  text-align: center;
+  font-family: var(--font-hei);
+  font-weight: 700;
+  font-size: var(--fs-issue);
+  line-height: 48px;
+}
+
+.h2 {
+  padding-top: var(--sb-h2);
+  margin-bottom: var(--sa-h2);
+  font-family: var(--font-hei);
+  font-weight: 700;
+  font-size: var(--fs-h2);
+  line-height: 48px;
+}
+
+.h3 {
+  padding-top: var(--sb-h3);
+  margin-bottom: var(--sa-h3);
+  font-family: var(--font-hei);
+  font-weight: 700;
+  font-size: var(--fs-h3);
+  line-height: 46px;
+}
+
+.item {
+  display: flex;
+  padding-top: var(--sb-para);
+  margin-bottom: var(--sa-para);
+  text-align: justify;
+}
+.item .marker {
+  flex: none;
+  width: 48px;
+  color: var(--c-blue);
+  font-family: var(--font-song);
+}
+.item .body { flex: 1; }
+
+b, strong { font-weight: 700; }
+
+/* 第 1 页专属版面件（按参考图绝对定位） */
+.furniture { position: absolute; }
+.issue-abs { left: 149px; top: 269px; width: 1052px; }
+.issue-abs .issue-title { margin: 0; }
+.figure-abs { left: 99px; top: 332px; width: 1053px; height: 588px; }
+.figure-img {
+  width: 1053px;
+  height: 588px;
+  object-fit: cover;
+  display: block;
+}
+.figure.placeholder {
+  width: 1053px;
+  height: 588px;
+  background: #d8e2ea;
+  border: 1px solid #b8c4cc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7a85;
+  font-size: 28px;
+}
+
+/* ---------- 页脚 ---------- */
+.page-footer {
+  position: absolute;
+  font-family: var(--font-meta);
+  color: var(--c-gray);
+  font-size: var(--fs-footer);
+  line-height: 28px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ---------- 打印 ---------- */
+@page { size: 370mm 260mm; margin: 0; }
+@media print {
+  html, body { background: #fff; }
+  .viewer { padding: 0; overflow: visible; }
+  .sheet-wrap { transform: none !important; }
+  .sheet { box-shadow: none; page-break-after: always; }
+}

@@ -1,0 +1,193 @@
+/* ============================================================
+   地理时政周刊一 — 报纸风版式（自设计稿 HTML 原样移植）
+   A4 横向、双栏、灰度打印、水印、打印按钮
+   ============================================================ */
+
+@page { size: A4 landscape; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Songti SC", "SimSun", "Noto Serif SC", serif;
+  background: #e8e8e8;
+  color: #000;
+  font-size: 9px;
+  line-height: 1.5;
+}
+.page, .page * { filter: grayscale(100%); }
+
+.print-btn {
+  position: fixed; top: 20px; right: 20px;
+  background: #333; color: #fff; border: none;
+  padding: 10px 20px; font-size: 13px; font-weight: bold;
+  cursor: pointer; border-radius: 4px; z-index: 999;
+}
+
+.page {
+  width: 297mm; height: 210mm;
+  background: #fff; margin: 10px auto;
+  padding: 10mm 12mm 14mm 12mm;
+  position: relative; overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+
+/* 页眉 */
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 2px solid #000; padding-bottom: 5px; margin-bottom: 8px;
+}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.logo-box {
+  width: 140px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 7px; color: #999;
+}
+.header-title { font-size: 14px; font-weight: bold; letter-spacing: 3px; }
+.header-title span { font-size: 9px; font-weight: normal; font-style: italic; color: #666; }
+.header-right { text-align: right; font-size: 8.5px; color: #333; }
+.header-right .issue { font-weight: bold; font-size: 10px; }
+
+/* 报头 */
+.masthead {
+  background: #726f6f; color: #fff;
+  padding: 12px 24px; margin-bottom: 10px; position: relative;
+}
+.masthead::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px; background: #fff;
+}
+.masthead .kicker { font-size: 9px; color: #ccc; letter-spacing: 4px; margin-bottom: 3px; }
+.masthead h1 { font-size: 26px; font-weight: 900; letter-spacing: 3px; line-height: 1.1; margin-bottom: 4px; }
+.masthead .sub { font-size: 9px; color: #999; letter-spacing: 4px; }
+
+/* 两栏 */
+.content { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* 章节 */
+.section { margin-bottom: 8px; }
+.section-title {
+  display: flex; align-items: center; margin-bottom: 4px;
+  padding-bottom: 2px; border-bottom: 1px solid #999;
+}
+.section-title .num {
+  font-size: 10px; font-weight: bold; background: #000; color: #fff;
+  padding: 1px 6px; margin-right: 6px;
+}
+.section-title h2 { font-size: 11px; font-weight: 900; letter-spacing: 1px; }
+
+h3 { font-size: 9.5px; font-weight: bold; margin: 4px 0 2px 0; }
+p { font-size: 8.5px; line-height: 1.55; margin-bottom: 2px; }
+.label { font-weight: bold; }
+
+.note {
+  background: #f0f0f0; border-left: 3px solid #000;
+  padding: 5px 8px; margin: 3px 0; font-size: 8px; line-height: 1.5;
+}
+.concept-box {
+  background: #f5f5f5; padding: 3px 6px; margin-bottom: 2px;
+  font-size: 8px; line-height: 1.4; border-left: 2px solid #999;
+}
+.concept-box .name { font-weight: bold; }
+
+.chain {
+  font-size: 8px; line-height: 1.6; padding: 4px 8px;
+  background: #fafafa; margin: 3px 0; border: 1px solid #ddd;
+}
+.chain .arrow { color: #666; font-weight: bold; }
+
+.trap { font-size: 8.5px; line-height: 1.5; margin-bottom: 2px; padding-left: 4px; }
+.trap .x { font-weight: bold; margin-right: 4px; }
+.trap .t { font-weight: bold; }
+
+.tpl { border: 2px solid #000; padding: 6px 10px; margin-bottom: 5px; }
+.tpl h4 { font-size: 9.5px; font-weight: bold; margin-bottom: 3px; }
+.tpl p { font-size: 8px; line-height: 1.5; margin-bottom: 3px; }
+.tpl .label { font-weight: bold; }
+
+.quiz {
+  background: #f5f5f5; padding: 5px 8px; margin: 3px 0;
+  font-size: 8px; line-height: 1.5;
+}
+.quiz .ans { font-weight: bold; }
+.quiz .exp { color: #555; font-size: 7.5px; }
+
+.req { font-size: 8.5px; line-height: 1.6; padding-left: 2px; }
+
+.img-ph {
+  height: 50px;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+}
+.img-ph .title { font-weight: bold; }
+
+.shilitu {
+  width: 48%; height: auto; padding-top: 79px;
+}
+/* 图片未提供时的占位（不影响设计稿原有样式） */
+.shilitu-ph {
+  border: 1px dashed #b8c4cc;
+  background: #f5f5f5;
+  color: #8a97a0;
+  display: flex; align-items: center; justify-content: center;
+  height: 220px;
+}
+
+.footer {
+  position: absolute; bottom: 8mm; left: 12mm; right: 12mm;
+  padding-top: 4px; border-top: 1px solid #000;
+}
+.footer-top {
+  display: flex; justify-content: space-between;
+  font-size: 8px; color: #333; margin-bottom: 2px;
+}
+.footer-bottom {
+  display: flex; justify-content: space-between;
+  font-size: 7.5px; color: #666;
+}
+.footer-bottom .center { font-weight: bold; }
+
+.name-row { display: flex; gap: 20px; font-size: 8.5px; margin-top: 4px; }
+.name-row span { border-bottom: 1px solid #000; min-width: 80px; display: inline-block; }
+
+/* ===== 水印配置（改这里就行） ===== */
+:root {
+  --watermark-text: "地理时政周刊 · 曹明环 · 何文静";
+  --watermark-size: 14px;
+  --watermark-color: #4e4c4c;
+  --watermark-opacity: 0.15;
+  --watermark-angle: -30deg;
+  --watermark-margin-x: 40px;   /* 水平间距（越小越密） */
+  --watermark-margin-y: 20px;   /* 垂直间距（越小越密） */
+}
+
+.watermark {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+.watermark-inner {
+  position: absolute;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  transform: rotate(var(--watermark-angle));
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+}
+.watermark-inner span {
+  display: inline-block;
+  font-size: var(--watermark-size);
+  color: var(--watermark-color);
+  opacity: var(--watermark-opacity);
+  white-space: nowrap;
+  margin: var(--watermark-margin-y) var(--watermark-margin-x);
+  font-family: "Songti SC", "SimSun", serif;
+}
+
+@media print {
+  body { background: #fff; }
+  .print-btn { display: none; }
+  .page { margin: 0; box-shadow: none; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+}
