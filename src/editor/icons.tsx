@@ -98,6 +98,14 @@ export const IconReset = (p: P) => (
     <path d="M3 4v5h5" />
   </S>
 )
+/** 自动存档：表盘 + 回拨箭头 */
+export const IconHistory = (p: P) => (
+  <S {...p}>
+    <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" />
+    <path d="M3.2 4.4v4.4h4.4" />
+    <path d="M12 7.8V12l3 1.8" />
+  </S>
+)
 export const IconEye = (p: P) => (
   <S {...p}>
     <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" />

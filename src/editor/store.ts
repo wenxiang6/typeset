@@ -15,6 +15,8 @@ import {
   isFlowable,
   isFurniture,
   isMeasurable,
+  findNeighbor,
+  swapWithNeighbor,
   resolveMove,
   moveElementToPage,
   normalizeDoc,
@@ -28,7 +30,17 @@ import {
   removePage as removePagePure,
 } from './layout'
 
-const STORAGE_KEY = 'paiban-editor-doc-v1'
+import {
+  DOC_KEY,
+  SNAP_INTERVAL,
+  backupCorrupt,
+  listSnapshots,
+  pushSnapshot,
+  snapshotAt,
+  writeDoc as writeDocStorage,
+} from './autosave'
+
+const STORAGE_KEY = DOC_KEY
 const HISTORY_LIMIT = 60
 
 /** 正文块变体：默认黑体五号的作用范围 */
@@ -47,9 +59,17 @@ function loadDoc(): Doc {
         const needsMigration = !parsed.version || parsed.version < DOC_VERSION
         return needsMigration ? reflowDoc(normalized) : normalized
       }
+      // 结构不对（pages 空 / 不是对象）：先备份，别让随后的自动保存把它盖掉
+      backupCorrupt(raw)
     }
   } catch (err) {
     console.warn('[paiban] 本地存档损坏，已回退到初始模板', err)
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (raw) backupCorrupt(raw)
+    } catch {
+      /* 忽略 */
+    }
   }
   return clone(INITIAL_DOC)
 }
@@ -92,6 +112,10 @@ export function useEditor() {
   const [pageIdx, setPageIdxState] = useState(0)
   const [drawMode, setDrawMode] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
+  /** 最近一次序列化结果：10 秒快照和「离开页面兜底」都复用它，不重复 stringify */
+  const rawRef = useRef('')
+  /** 最近一次已经写进 localStorage 的内容，用来判断「还有没有没落盘的改动」 */
+  const lastWrittenRef = useRef('')
 
   // 切换到别的组件/页面时，自动退出内部元素选择
   useEffect(() => {
@@ -109,18 +133,59 @@ export function useEditor() {
     setDocState(next)
   }, [])
 
-  // 自动保存
+  // 自动保存：改动 400ms 后落地（主存档），保证刷新/崩溃只丢最后 0.4 秒。
+  // 注意这里不 setState：保存结果走 autosave 的订阅式小仓库，
+  // 否则每保存一次就整棵树重渲染，会打断正在进行的拖动（表格行列线等）。
   useEffect(() => {
+    rawRef.current = JSON.stringify(doc)
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(doc))
-      } catch {
-        /* 存储满则忽略 */
-      }
+      writeDocStorage(rawRef.current)
+      lastWrittenRef.current = rawRef.current
     }, 400)
     return () => window.clearTimeout(saveTimer.current)
   }, [doc])
+
+  // 滚动快照：编辑状态下每 10 秒打一份，专治「手滑之后才想起来」
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!rawRef.current) return
+      pushSnapshot(rawRef.current, docRef.current)
+    }, SNAP_INTERVAL)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // 关窗口 / 切到后台：立刻补写还没落盘的改动。
+  // 注意只补「有改动」的那一次：如果存档是被外部清掉的（清空存档、测试重置），
+  // 这里不能把它又写回去，否则重置等于没做。
+  useEffect(() => {
+    const flush = () => {
+      const raw = rawRef.current
+      if (!raw || raw === lastWrittenRef.current) return
+      // 存档已经被清掉了（用户主动重置 / 测试重置）：不要把内存里的版面写回去
+      let hasArchive = false
+      try {
+        hasArchive = localStorage.getItem(DOC_KEY) !== null
+      } catch {
+        hasArchive = false
+      }
+      if (!hasArchive) return
+      writeDocStorage(raw)
+      lastWrittenRef.current = raw
+      pushSnapshot(raw, docRef.current)
+    }
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', onHide)
+    }
+  }, [])
 
   const commit = useCallback(
     (updater: (d: Doc) => Doc) => {
@@ -278,6 +343,33 @@ export function useEditor() {
         }
         return d
       })
+    },
+    [commit],
+  )
+
+  /**
+   * 与指定方向上最近的相邻组件交换位置（方向键）。
+   * 只交换阅读顺序、不改两者合起来占的空间，所以不会压到下面的内容。
+   * @returns 是否真的发生了交换
+   */
+  const swapNeighbor = useCallback(
+    (id: string, dir: 'up' | 'down' | 'left' | 'right') => {
+      const d0 = docRef.current
+      let pi = -1
+      for (let i = 0; i < d0.pages.length; i++) {
+        if (d0.pages[i].els.some((e) => e.id === id)) {
+          pi = i
+          break
+        }
+      }
+      if (pi < 0) return false
+      // 先探测：没有可交换对象就不要写历史
+      if (!findNeighbor(d0, pi, id, dir)) return false
+      commit((d) => {
+        swapWithNeighbor(d, pi, id, dir)
+        return d
+      })
+      return true
     },
     [commit],
   )
@@ -478,6 +570,44 @@ export function useEditor() {
     [commit],
   )
 
+  /* —— 自动存档 / 历史快照 —— */
+
+  /** 立刻写一次（不等 400ms 防抖），并顺手打一份快照 */
+  const saveNow = useCallback(() => {
+    const raw = JSON.stringify(docRef.current)
+    rawRef.current = raw
+    const state = writeDocStorage(raw)
+    if (state.ok) {
+      lastWrittenRef.current = raw
+      pushSnapshot(raw, docRef.current)
+    }
+    return state.ok
+  }, [])
+
+  /** 从 10 秒快照里恢复某一版（走 commit，可 Ctrl+Z 反悔） */
+  const restoreSnapshot = useCallback(
+    (at: number) => {
+      const raw = snapshotAt(at)
+      if (!raw) return false
+      try {
+        const parsed = JSON.parse(raw) as Doc
+        if (!parsed || !Array.isArray(parsed.pages) || !parsed.pages.length) return false
+        const normalized = normalizeDoc(parsed)
+        commit(() => (isBrokenLayout(normalized) ? repairLayout(normalized) : reflowDoc(normalized)))
+        setSelection(null)
+        setEditingId(null)
+        setPageIdxState(0)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [commit],
+  )
+
+  /** 快照列表（读盘即可，不进 React state，避免无谓重渲染） */
+  const getSnapshots = useCallback(() => listSnapshots(), [])
+
   /* —— 横竖版 / 自动排版 —— */
 
   const setOrientation = useCallback(
@@ -517,20 +647,21 @@ export function useEditor() {
       let any = false
       for (const page of current.pages) {
         for (const el of page.els) {
-          if (!isMeasurable(el) || el.autoHeight === false) continue
+          if (!isMeasurable(el)) continue
           const h = heights[el.id]
-          if (typeof h === 'number') {
-            const target = Math.max(8, Math.ceil(h))
-            if (Math.abs(target - el.h) > 0.6) {
-              any = true
-              break
-            }
+          if (typeof h !== 'number') continue
+          const target = Math.max(8, Math.ceil(h))
+          // 锁高元素只在「内容装不下」时才算变化
+          if (el.autoHeight === false && target <= el.h + 1) continue
+          if (Math.abs(target - el.h) > 0.6) {
+            any = true
+            break
           }
         }
         if (any) break
       }
       if (!any) return
-      commit((d) => applyHeights(d, heights))
+      commit((d) => applyHeights(d, heights, { growLocked: true }))
     },
     [commit],
   )
@@ -757,11 +888,15 @@ export function useEditor() {
       commit,
       undo,
       redo,
+      saveNow,
+      restoreSnapshot,
+      getSnapshots,
       findEl,
       getDoc,
       updateEl,
       updateStyle,
       nudge,
+      swapNeighbor,
       setSubSelection,
       updateSubStyle,
       nudgeSub,
@@ -797,8 +932,9 @@ export function useEditor() {
     }),
     [
       doc, past, future, selection, subSelection, editingId, grid, zoom, pageIdx, drawMode, setPageIdx, commit, undo, redo, findEl,
-      getDoc, updateEl, updateStyle, nudge, setSubSelection, updateSubStyle, nudgeSub, clearSubStyle, applyDefaultsToBody, beginTx, endTx, cancelTx, isTxActive, addEl, removeEl,
+      getDoc, updateEl, updateStyle, nudge, swapNeighbor, setSubSelection, updateSubStyle, nudgeSub, clearSubStyle, applyDefaultsToBody, beginTx, endTx, cancelTx, isTxActive, addEl, removeEl,
       duplicateEl, setZ, toggleLock, updatePage, resetDoc, importDoc, snapVal, setOrientation, setFlow, reflow, repair, applyMeasuredHeights, setPageBackground, makeBackground, splitTextElement, moveElToPageAt, clearNoFlow, moveElToPage, moveElToNextPage, addPage, removePage,
+      saveNow, restoreSnapshot, getSnapshots,
     ],
   )
 }

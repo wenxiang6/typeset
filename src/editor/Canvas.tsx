@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { El } from './types'
 import type { EditorApi } from './store'
-import { findRegion, getGeometry, isFurniture, isMeasurable, resolveMove } from './layout'
+import { findRegion, columnOf, getGeometry, isFlowable, isFurniture, isMeasurable, PAGE_GAP, resolveMove, type Rect } from './layout'
 import { resolveImageSrc } from './localImage'
 import { TableHandles } from './TableHandles'
 
 const HANDLES = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'] as const
+
+/**
+ * 拖动的「让位」节流：
+ * 拖动过程中组件只跟手，不推挤其它内容（老行为是每一帧都推，一拖就整栏飞走）。
+ * 指针停稳 DWELL_MS 之后，才把这次推挤应用到版面；一旦继续移动就撤销这次预览。
+ * 松手时在落点再落实一次，避免留下重叠。
+ */
+const DWELL_MS = 800
+/** 指针抖动容差（屏幕像素），触控板手抖也不会重置计时 */
+const DWELL_TOL = 3
 
 export interface SplitPayload {
   topHtml: string
@@ -148,6 +158,10 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
   const selected = api.selection === el.id
   const editing = api.editingId === el.id
   const ref = useRef<HTMLDivElement>(null)
+  // 拖动状态必须走 state：className 由 React 计算，命令式 classList 会被重渲染冲掉
+  const [dragging, setDragging] = useState(false)
+  const [pushHint, setPushHint] = useState(false)
+  const [ghosted, setGhosted] = useState(false)
 
   // 复合组件内部元素：直接子元素可单独覆盖样式和位置
   useLayoutEffect(() => {
@@ -177,7 +191,17 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
 
   const startDrag = useCallback(
     (e: React.PointerEvent, mode: 'move' | Handle) => {
-      if (el.locked || editing) return
+      if (editing) return
+      /* 锁定元素（页眉 / 页脚 / 报头）不能拖动，但必须能选中：
+       * 属性面板里要能改样式、双击要能改文字。以前这里直接 return，
+       * 结果点上去毫无反应，像坏了。 */
+      if (el.locked) {
+        e.stopPropagation()
+        e.preventDefault()
+        api.setSelection(el.id)
+        api.setSubSelection(null)
+        return
+      }
       e.stopPropagation()
       e.preventDefault()
 
@@ -195,7 +219,7 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
       }
 
       const node = ref.current
-      node?.classList.add('is-dragging')
+      setDragging(true)
 
       const targetEl = e.currentTarget as HTMLElement
       const startX = e.clientX
@@ -207,6 +231,97 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
       let last = orig
       let lastClientY = e.clientY
       let lastTarget = pageIdx
+
+      /* —— 推挤节流：拖动中只跟手，停稳 DWELL_MS 才推挤其它组件 —— */
+      let pending = new Map<string, Rect>()
+      let pushing = false
+      const pristine = new Map<string, Rect>()
+      let dwellTimer: number | null = null
+      let dwellAnchor = { x: startX, y: startY }
+
+      /**
+       * 计算「让位」结果：同栏内按阅读顺序向下顺推，每个元素只排在它上面那个的下面。
+       * 不用 resolveMove 的 pushed —— 那套沿方向试探的级联会反复互相推，
+       * 停下来那一刻会把若干元素一起堆到页底（看起来像“顶飞”）。
+       */
+      const planPush = (rect: Rect) => {
+        const cur = api.getDoc()
+        const geom = getGeometry(cur, pageIdx)
+        const col = columnOf(geom, rect)
+        const others = (cur.pages[pageIdx]?.els ?? [])
+          .filter((x) => isFlowable(x) && !x.background && x.kind !== 'region' && x.id !== el.id)
+          .filter((x) => {
+            const c = columnOf(geom, x)
+            return c === col || c === 'span' || col === 'span'
+          })
+          .sort((a, b) => a.y - b.y || a.x - b.x)
+
+        const plan = new Map<string, Rect>()
+        let cursor = rect.y + rect.h + PAGE_GAP
+        for (const x of others) {
+          // 完全在拖动元素上方的：不受影响
+          if (x.y + x.h <= rect.y + 0.5) continue
+          const y = Math.max(x.y, cursor)
+          if (x.locked) {
+            // 锁定元素不动，但也不能把别的内容推到它身上
+            cursor = Math.max(cursor, x.y + x.h + PAGE_GAP)
+            continue
+          }
+          if (y > x.y + 0.5) plan.set(x.id, { x: x.x, y, w: x.w, h: x.h })
+          cursor = Math.max(cursor, y + x.h + PAGE_GAP)
+        }
+        return plan
+      }
+
+      const clearDwell = () => {
+        if (dwellTimer != null) {
+          window.clearTimeout(dwellTimer)
+          dwellTimer = null
+        }
+      }
+
+      /** 撤销已应用的推挤，把被挤的组件放回原位 */
+      const undoPush = () => {
+        setPushHint(false)
+        if (!pushing) return
+        pristine.forEach((rect, id) => api.updateEl(id, rect, false))
+        pristine.clear()
+        pushing = false
+      }
+
+      /** 停够了：把待定的推挤真正应用（先记下原位，方便再动时回退） */
+      const applyPush = () => {
+        setPushHint(false)
+        if (!pending.size) return
+        const cur = api.getDoc()
+        pending.forEach((rect, id) => {
+          if (!pristine.has(id)) {
+            const src = cur.pages[pageIdx]?.els.find((x) => x.id === id)
+            if (src) pristine.set(id, { x: src.x, y: src.y, w: src.w, h: src.h })
+          }
+          api.updateEl(id, rect, false)
+        })
+        pushing = true
+      }
+
+      /** 指针动了（超过容差）→ 撤销预览并重新计时 */
+      const onPointerMoved = (ev: PointerEvent) => {
+        if (Math.hypot(ev.clientX - dwellAnchor.x, ev.clientY - dwellAnchor.y) <= DWELL_TOL) return false
+        dwellAnchor = { x: ev.clientX, y: ev.clientY }
+        clearDwell()
+        undoPush()
+        return true
+      }
+
+      /** 指针停住：若有待推挤，安排 DWELL_MS 后应用 */
+      const armPush = () => {
+        if (!pending.size || pushing) {
+          setPushHint(false)
+          return
+        }
+        setPushHint(true)
+        if (dwellTimer == null) dwellTimer = window.setTimeout(applyPush, DWELL_MS)
+      }
 
       /** 指针下的目标页；越过最后一页时返回 pages.length（新建一页） */
       const targetPageAt = (clientX: number, clientY: number) => {
@@ -223,6 +338,7 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
       }
 
       const move = (ev: PointerEvent) => {
+        onPointerMoved(ev)
         const doc = api.getDoc()
         const dx = (ev.clientX - startX) / api.zoom
         const dy = (ev.clientY - startY) / api.zoom
@@ -261,7 +377,7 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
         if (mode === 'move' && !furniture) {
           lastTarget = targetPageAt(ev.clientX, ev.clientY)
           const crossPage = lastTarget !== pageIdx
-          node?.classList.toggle('is-ghosted', crossPage)
+          setGhosted(crossPage)
           onHoverPage?.(crossPage ? lastTarget : null)
           if (crossPage) {
             // 指针已经在其他页/新页上：源页不再继续推挤，改为跟随指针的浮层预览
@@ -271,7 +387,7 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
           onGhost?.(null)
         } else {
           lastTarget = pageIdx
-          node?.classList.remove('is-ghosted')
+          setGhosted(false)
           onGhost?.(null)
           onHoverPage?.(null)
         }
@@ -288,7 +404,9 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
         const res = resolveMove(doc, pageIdx, el.id, next, last, region)
         last = res.rect
         api.updateEl(el.id, res.rect, false)
-        res.pushed.forEach((rect, pid) => api.updateEl(pid, rect, false))
+        // 推挤先挂起：等指针停稳 DWELL_MS 才应用，避免拖动中把整栏内容顶飞
+        pending = planPush(res.rect)
+        armPush()
       }
 
       const up = (ev: PointerEvent) => {
@@ -299,11 +417,13 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
         }
         window.removeEventListener('pointermove', move)
         window.removeEventListener('pointerup', up)
-        node?.classList.remove('is-dragging')
+        setDragging(false)
+        setPushHint(false)
+        clearDwell()
 
         onHoverPage?.(null)
         onGhost?.(null)
-        node?.classList.remove('is-ghosted')
+        setGhosted(false)
         const doc = api.getDoc()
         const geom = getGeometry(doc, pageIdx)
         const pageNode = node?.closest('.ed-page') as HTMLElement | null
@@ -335,6 +455,8 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
           // 手动改高度后关闭自动高度，避免被测量结果立刻弹回去
           api.updateEl(el.id, { autoHeight: false }, false)
         }
+        // 落点确认：把最后一次待定的推挤落实，否则会留下重叠
+        if (!pushing) applyPush()
         api.updateEl(el.id, last, false)
         api.endTx() // 拖动/缩放/避让/分页整体记一次历史
       }
@@ -380,7 +502,7 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
     <div
       ref={ref}
       data-el-id={el.id}
-      className={`ed-el ed-kind-${el.kind} ed-v-${el.variant}${s.background ? ' has-custom-bg' : ''}${selected ? ' is-selected' : ''}${el.locked ? ' is-locked' : ''}${editing ? ' is-editing' : ''}`}
+      className={`ed-el ed-kind-${el.kind} ed-v-${el.variant}${s.background ? ' has-custom-bg' : ''}${selected ? ' is-selected' : ''}${el.locked ? ' is-locked' : ''}${editing ? ' is-editing' : ''}${dragging ? ' is-dragging' : ''}${pushHint ? ' is-awaiting-push' : ''}${ghosted ? ' is-ghosted' : ''}`}
       style={style}
       onPointerDown={(e) => {
         if (editing || api.drawMode) return
@@ -400,7 +522,8 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
         startDrag(e, 'move')
       }}
       onDoubleClick={(e) => {
-        if (el.kind === 'image' || el.kind === 'region' || el.locked) return
+        // 页眉/页脚/报头是锁定元素：不允许拖动，但双击进编辑是安全的（只改内容不改位置）
+        if (el.kind === 'image' || el.kind === 'region') return
         e.stopPropagation()
         api.setSelection(el.id)
         api.setEditingId(el.id)
@@ -441,6 +564,14 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
             }
           }}
           onPointerDown={(e) => e.stopPropagation()}
+          onInput={(e) => {
+            /* 输入过程中就让框跟着长高，不必等退出编辑。
+             * 只改 DOM 高度、不写文档：写文档会重建 contentEditable、把光标弄丢。 */
+            const node = ref.current
+            if (!node) return
+            const natural = Math.ceil(e.currentTarget.scrollHeight)
+            if (natural > 8) node.style.height = `${natural}px`
+          }}
         />
       ) : (
         <ElContent el={el} />
@@ -644,8 +775,11 @@ export function Canvas({ api }: { api: EditorApi }) {
     for (const node of nodes) {
       const id = node.dataset.elId
       const el = id ? els.get(id) : null
-      if (!el || !isMeasurable(el) || el.autoHeight === false) continue
+      if (!el || !isMeasurable(el)) continue
       if (api.editingId === el.id) continue
+      // 手动锁过高度的元素（拖过上下手柄、或在属性面板里输入过「高」）也要测：
+      // 内容装不下时必须向上长高，否则文字溢出框外、压住下面的内容
+      const heightLocked = el.autoHeight === false
       const slot = node.querySelector<HTMLElement>('.ed-slot')
       if (!slot) continue
 
@@ -687,7 +821,12 @@ export function Canvas({ api }: { api: EditorApi }) {
         }
       }
 
-      if (Math.abs(natural - el.h) > 0.6) heights[el.id] = natural
+      if (heightLocked) {
+        // 只向上长，不缩回：用户手动设的更大高度要保留
+        if (natural > el.h + 1) heights[el.id] = natural
+      } else if (Math.abs(natural - el.h) > 0.6) {
+        heights[el.id] = natural
+      }
     }
 
     if (splitDone) return
@@ -725,7 +864,9 @@ export function Canvas({ api }: { api: EditorApi }) {
           <span className="ed-hint">🔍 双指捏合 / Ctrl+滚轮缩放</span>
         </div>
         <span className="ed-hint">
-          {api.drawMode ? '在页面上拖出一块区域：落入其中的元素会被约束在区域内' : '拖动移动 · 拖到其他页可跨页 · 松手自动补齐/翻页'}
+          {api.drawMode
+            ? '在页面上拖出一块区域：落入其中的元素会被约束在区域内'
+            : '拖动移动 · 拖到其他页可跨页 · 方向键与相邻组件换位 · Alt+方向键微调'}
         </span>
       </div>
       <div className="ed-canvas-scroll" ref={scrollRef}>

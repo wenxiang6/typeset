@@ -38,6 +38,7 @@ node tools/paiban-mcp/server.mjs
 | 变量 | 作用 |
 | --- | --- |
 | `PAIBAN_URL` | 指定已有页面地址（默认 `http://127.0.0.1:5173/`） |
+| `PAIBAN_CDP` | 接管已打开的 Chrome，例如 `http://127.0.0.1:9222`（优先于 `PAIBAN_URL`；不清存档、不重载） |
 | `PAIBAN_CHROMIUM` | 指定 Chrome/Chromium 可执行文件 |
 | `PLAYWRIGHT_BROWSERS_PATH` | Playwright 浏览器缓存目录 |
 
@@ -47,11 +48,13 @@ node tools/paiban-mcp/server.mjs
 | --- | --- |
 | `paiban_status` | 页数、元素数、横竖版、每页底部、页脚页码、出界/重叠/消失检查 |
 | `paiban_dom` | DOM 完整性；`{rects:true}` 附带每个元素矩形 |
-| `paiban_console` | 控制台错误/警告、pageerror；`{clear:true}` 读取后清空 |
+| `paiban_console` | 控制台错误/警告、pageerror、请求失败、4xx/5xx；`{clear:true}` 读取后清空 |
 | `paiban_screenshot` | 截图并返回图片内容与 `artifacts/smoke/` 路径 |
+| `paiban_pages_shot` | 逐页截图（自动滚动到每页），存 `pages-N.png`，第 1 页内联返回 |
+| `paiban_import_word` | 导入本机 Word 原稿：解析 → 生成版面 → 返回页数/组件数/不变量。`orientation: landscape\|portrait` 选导入成横版还是竖版；`merge: auto\|merge\|split` 控制短条目（学习要求/必考能力/易错项）合并还是拆分 |
 | `paiban_eval` | 在页面上下文执行 JS，可用 `api`（`window.__paibanApi`） |
 | `paiban_orientation` | 切换 `portrait` / `landscape` 并等待重排稳定 |
-| `paiban_reset` | 清空本地存档、回到初始模板 |
+| `paiban_reset` | 清空本地存档、回到初始模板（CDP 模式下只重载页面，不动存档） |
 | `paiban_print_check` | 切打印媒体，检查工具栏/纸张/@page，再恢复 |
 | `paiban_run_smoke` | 执行 `pnpm smoke` 全套回归 |
 

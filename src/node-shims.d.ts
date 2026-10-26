@@ -11,3 +11,9 @@ declare module 'node:path' {
   }
   export default path
 }
+
+/** 本机 Word 导入插件（tools/import/，纯 Node ESM，不参与前端构建） */
+declare module '*/tools/import/server-plugin.mjs' {
+  import type { Plugin } from 'vite'
+  export function docImportPlugin(): Plugin
+}

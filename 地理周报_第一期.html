@@ -7,315 +7,197 @@
   @page { size: A4 landscape; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: "Songti SC", "SimSun", "Noto Serif SC", serif;
+    font-family: "SimHei", "Heiti SC", "Microsoft YaHei", sans-serif;
     background: #e8e8e8;
     color: #000;
-    font-size: 9.5px;
+    font-size: 14px;
     line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-
-  /* 黑白滤镜 */
-  .page, .page * {
-    filter: grayscale(100%);
-  }
+  .page img { filter: grayscale(100%); }
 
   .print-btn {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: #333;
-    color: #fff;
-    border: none;
-    padding: 10px 20px;
-    font-size: 13px;
-    font-weight: bold;
-    cursor: pointer;
-    border-radius: 4px;
-    z-index: 999;
+    position: fixed; top: 20px; right: 20px;
+    background: #333; color: #fff; border: none;
+    padding: 10px 20px; font-size: 13px; font-weight: bold;
+    cursor: pointer; border-radius: 4px; z-index: 999;
   }
 
   .page {
-    width: 297mm;
-    height: 210mm;
-    background: #fff;
-    margin: 10px auto;
-    padding: 10mm 12mm 14mm 12mm;
-    position: relative;
-    overflow: hidden;
+    width: 297mm; height: 210mm;
+    background: #fff; margin: 10px auto;
+    padding: 8mm 10mm 12mm 10mm;
+    position: relative; overflow: hidden;
     box-shadow: 0 2px 12px rgba(0,0,0,0.15);
   }
 
   /* 页眉 */
   .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 2px solid #000;
-    padding-bottom: 5px;
-    margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px;
   }
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .logo-box {
-    width: 50px;
-    height: 30px;
-    border: 1px dashed #999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 7px;
-    color: #999;
-  }
-  .header-title {
-    font-size: 14px;
-    font-weight: bold;
-    letter-spacing: 3px;
-  }
-  .header-title span {
-    font-size: 9px;
-    font-weight: normal;
-    font-style: italic;
-    color: #666;
-    letter-spacing: 1px;
-  }
-  .header-right {
-    text-align: right;
-    font-size: 8.5px;
-    color: #333;
-  }
-  .header-right .issue {
-    font-weight: bold;
-    font-size: 10px;
-  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .header-title { font-size: 14px; font-weight: bold; letter-spacing: 3px; }
+  .header-title span { font-size: 9px; font-weight: normal; font-style: italic; color: #666; }
+  .header-right { text-align: right; font-size: 10px; color: #333; }
+  .header-right .issue { font-weight: bold; font-size: 12px; }
 
   /* 报头 */
   .masthead {
-    background: #1a1a1a;
-    color: #fff;
-    padding: 14px 24px;
-    margin-bottom: 10px;
-    position: relative;
+    background: #8d8d8d; color: #fff;
+    padding: 10px 20px; margin-bottom: 8px; position: relative;
   }
   .masthead::after {
-    content: "";
-    position: absolute;
-    left: 0; right: 0; bottom: 0;
-    height: 2px;
-    background: #fff;
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+    height: 2px; background: #fff;
   }
-  .masthead .kicker {
-    font-size: 9px;
-    color: #ccc;
-    letter-spacing: 4px;
-    margin-bottom: 3px;
-  }
-  .masthead h1 {
-    font-size: 28px;
-    font-weight: 900;
-    letter-spacing: 3px;
-    line-height: 1.1;
-    margin-bottom: 4px;
-  }
-  .masthead .sub {
-    font-size: 9px;
-    color: #999;
-    letter-spacing: 4px;
-  }
+  .masthead .kicker { font-size: 16px; color: #e6e4e4; letter-spacing: 4px; margin-bottom: 3px; font-weight: 700; }
+  .masthead h1 { font-size: 24px; font-weight: 900; letter-spacing: 3px; line-height: 1.1; margin-bottom: 3px; }
+  .masthead .sub { font-size: 14px; color: #eaeaea; letter-spacing: 4px; font-weight: 700; }
 
   /* 两栏 */
-  .content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-  }
+  .content { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-  /* 章节标题 */
-  .section {
-    margin-bottom: 8px;
-  }
+  /* 章节 */
+  .section { margin-bottom: 6px; }
   .section-title {
-    display: flex;
-    align-items: center;
-    margin-bottom: 4px;
-    padding-bottom: 2px;
-    border-bottom: 1px solid #999;
+    display: flex; align-items: center; margin-bottom: 3px;
+    padding-bottom: 2px; border-bottom: 1px solid #999;
   }
   .section-title .num {
-    font-size: 10px;
-    font-weight: bold;
-    background: #000;
-    color: #fff;
-    padding: 1px 6px;
-    margin-right: 6px;
+    font-size: 12px; font-weight: bold; background: #000; color: #fff;
+    padding: 1px 6px; margin-right: 6px;
   }
-  .section-title h2 {
-    font-size: 12px;
-    font-weight: 900;
-    letter-spacing: 1px;
-  }
+  .section-title h2 { font-size: 13px; font-weight: 900; letter-spacing: 1px; }
 
-  h3 {
-    font-size: 10px;
-    font-weight: bold;
-    margin: 4px 0 2px 0;
-  }
-
-  p {
-    font-size: 9px;
-    line-height: 1.55;
-    margin-bottom: 2px;
-  }
+  h3 { font-size: 14px; font-weight: bold; margin: 4px 0 2px 0; }
+  p { font-size: 14px; line-height: 1.55; margin-bottom: 2px; }
   .label { font-weight: bold; }
 
-  /* 提示框 */
   .note {
-    background: #f0f0f0;
-    border-left: 3px solid #000;
-    padding: 5px 8px;
-    margin: 3px 0;
-    font-size: 8.5px;
-    line-height: 1.5;
+    background: #f0f0f0; border-left: 3px solid #000;
+    padding: 5px 8px; margin: 3px 0; font-size: 13px; line-height: 1.5;
   }
-
-  /* 概念框 */
   .concept-box {
-    background: #f5f5f5;
-    padding: 3px 6px;
-    margin-bottom: 2px;
-    font-size: 8.5px;
-    line-height: 1.4;
-    border-left: 2px solid #999;
+    background: #f5f5f5; padding: 4px 7px; margin-bottom: 3px;
+    font-size: 13px; line-height: 1.45; border-left: 2px solid #999;
   }
   .concept-box .name { font-weight: bold; }
 
-  /* 逻辑链 */
   .chain {
-    font-size: 8.5px;
-    line-height: 1.6;
-    padding: 4px 8px;
-    background: #fafafa;
-    margin: 3px 0;
-    border: 1px solid #ddd;
+    font-size: 13px; line-height: 1.6; padding: 5px 8px;
+    background: #fafafa; margin: 3px 0; border: 1px solid #ddd;
   }
-  .chain .tag { font-weight: bold; }
   .chain .arrow { color: #666; font-weight: bold; }
 
-  /* 易错坑 */
-  .trap {
-    font-size: 9px;
-    line-height: 1.5;
-    margin-bottom: 2px;
-    padding-left: 4px;
-  }
+  .trap { font-size: 13px; line-height: 1.5; margin-bottom: 2px; padding-left: 4px; }
   .trap .x { font-weight: bold; margin-right: 4px; }
   .trap .t { font-weight: bold; }
 
-  /* 答题模板框 */
-  .tpl {
-    border: 2px solid #000;
-    padding: 6px 10px;
-    margin-bottom: 5px;
-  }
-  .tpl h4 {
-    font-size: 10px;
-    font-weight: bold;
-    margin-bottom: 3px;
-  }
-  .tpl p {
-    font-size: 8.5px;
-    line-height: 1.5;
-    margin-bottom: 3px;
-  }
+  .tpl { border: 2px solid #000; padding: 6px 9px; margin-bottom: 5px; }
+  .tpl h4 { font-size: 14px; font-weight: bold; margin-bottom: 3px; }
+  .tpl p { font-size: 13px; line-height: 1.5; margin-bottom: 3px; }
   .tpl .label { font-weight: bold; }
 
-  /* 习题 */
   .quiz {
-    background: #f5f5f5;
-    padding: 5px 8px;
-    margin: 3px 0;
-    font-size: 8.5px;
-    line-height: 1.5;
+    background: #f5f5f5; padding: 3px 6px; margin: 2px 0;
+    font-size: 11px; line-height: 1.4;
   }
   .quiz .ans { font-weight: bold; }
-  .quiz .exp { color: #555; font-size: 8px; }
+  .quiz .exp { color: #555; font-size: 10px; }
 
-  /* 学习要求 */
-  .req {
-    font-size: 9px;
-    line-height: 1.6;
-    padding-left: 2px;
-  }
+  .req { font-size: 13px; line-height: 1.6; padding-left: 2px; }
 
-  /* 配图预留 */
   .img-ph {
-    background: #f0f0f0;
-    height: 50px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: #666;
-    font-size: 8px;
-    border: 1px dashed #999;
-    margin: 4px 0;
+    display: flex; justify-content: center; align-items: center;
+    margin: 6px 0;
   }
-  .img-ph .title { font-weight: bold; }
+  .img-ph img { max-width: 100%; max-height: 287px; }
 
-  /* 页脚 */
   .footer {
-    position: absolute;
-    bottom: 8mm;
-    left: 12mm;
-    right: 12mm;
-    padding-top: 4px;
-    border-top: 1px solid #000;
+    position: absolute; bottom: 6mm; left: 10mm; right: 10mm;
+    padding-top: 3px; border-top: 1px solid #000;
   }
   .footer-top {
-    display: flex;
-    justify-content: space-between;
-    font-size: 8.5px;
-    color: #333;
-    margin-bottom: 2px;
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: #333; margin-bottom: 2px;
   }
   .footer-bottom {
-    display: flex;
-    justify-content: space-between;
-    font-size: 8px;
-    color: #666;
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: #666;
   }
-  .footer-bottom .center {
-    font-weight: bold;
+  .footer-bottom .center { font-weight: bold; }
+
+  .name-row { display: flex; gap: 20px; font-size: 13px; margin-top: 4px; }
+  .name-row span { border-bottom: 1px solid #000; min-width: 80px; display: inline-block; }
+
+  /* ===== 水印配置（改这里就行） ===== */
+  :root {
+    --watermark-text: "地理时政周刊 · 曹明环 · 何文静";
+    --watermark-size: 14px;
+    --watermark-color: #999;
+    --watermark-opacity: 0.15;
+    --watermark-angle: -30deg;
+    --watermark-margin-x: 40px;
+    --watermark-margin-y: 20px;
   }
 
-  /* 姓名学号栏 */
-  .name-row {
-    display: flex;
-    gap: 20px;
-    font-size: 9px;
-    margin-top: 4px;
+  .watermark {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    overflow: hidden;
   }
-  .name-row span {
-    border-bottom: 1px solid #000;
-    min-width: 80px;
+  .watermark-inner {
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    transform: rotate(var(--watermark-angle));
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+  }
+  .watermark-inner span {
     display: inline-block;
+    font-size: var(--watermark-size);
+    color: var(--watermark-color);
+    opacity: var(--watermark-opacity);
+    white-space: nowrap;
+    margin: var(--watermark-margin-y) var(--watermark-margin-x);
+    font-family: "SimHei", "Heiti SC", sans-serif;
   }
 
   @media print {
-    body { background: #fff; }
+    body { background: #e8e8e8; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .print-btn { display: none; }
-    .page {
-      margin: 0;
-      box-shadow: none;
-      page-break-after: always;
-    }
+    .page { margin: 0; box-shadow: none; page-break-after: always; }
     .page:last-child { page-break-after: auto; }
   }
 </style>
 </head>
 <body>
+
+<!-- 水印（文字在上面 CSS 变量里改） -->
+<div class="watermark">
+  <div class="watermark-inner" id="watermarkInner"></div>
+</div>
+
+<script>
+  const root = getComputedStyle(document.documentElement);
+  const text = root.getPropertyValue('--watermark-text').trim().replace(/"/g, '');
+  const inner = document.getElementById('watermarkInner');
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      const s = document.createElement('span');
+      s.textContent = text;
+      inner.appendChild(s);
+    }
+  }
+</script>
 
 <button class="print-btn" onclick="window.print()">🖨 打印 / 导出 PDF</button>
 
@@ -324,7 +206,6 @@
 
   <div class="header">
     <div class="header-left">
-      <div class="logo-box">LOGO</div>
       <div class="header-title">地理时政周刊 <span>GEO WEEKLY</span></div>
     </div>
     <div class="header-right">
@@ -343,6 +224,10 @@
 
     <!-- 左栏 -->
     <div>
+      <!-- 配图 -->
+      <div class="img-ph">
+        <img src="./img1.png" alt="图 · 沃克环流示意图">
+      </div>
 
       <!-- 一、教材定位 -->
       <div class="section">
@@ -362,6 +247,12 @@
       </div>
 
       <!-- 二、高考考纲 -->
+
+
+    </div>
+
+    <!-- 右栏 -->
+    <div>
       <div class="section">
         <div class="section-title">
           <span class="num">二</span>
@@ -376,32 +267,62 @@
         <h3>高考命题趋势</h3>
         <p>以年度极端天气、全球气候异常时政切入，重因果、重逻辑、重整体性，极少纯概念默写。</p>
       </div>
-
-      <!-- 三、厄尔尼诺必背 -->
-      <div class="section">
-        <div class="section-title">
+      <div class="section-title">
           <span class="num">三</span>
           <h2>厄尔尼诺 · 必背主干知识</h2>
         </div>
         <h3>1. 定义与判定</h3>
         <p>赤道中东太平洋海区，表层海水持续异常增温。</p>
         <p><span class="label">判定标准：</span>海温距平 ≥ +0.5℃，连续多月持续，即为厄尔尼诺事件。周期 2—7 年。</p>
-        <h3>2. 形成机理（必背逻辑链）</h3>
-        <div class="chain">
+        <h3 style="margin-top: 10px;">2. 形成机理（必背逻辑链）</h3>
+        <div class="chain" style="margin-top: 10px; margin-bottom: 10px;">
           东南信风减弱<span class="arrow">→</span>南赤道暖流减弱、赤道逆流增强<span class="arrow">→</span>西太平洋暖水向东堆积<span class="arrow">→</span>中东太平洋暖水增多<span class="arrow">→</span>沿岸上升补偿流减弱、冷水上泛减少<span class="arrow">→</span>海温异常升高<span class="arrow">→</span>太平洋东西温差减小<span class="arrow">→</span>沃克环流减弱甚至反转
         </div>
         <h3>3. 全球气候与生态影响</h3>
         <p><span class="label">太平洋东岸（秘鲁、厄瓜多尔）：</span>海温升高，气流上升，降水激增，暴雨、洪涝多发；上升流大幅减弱，营养盐匮乏，秘鲁渔场严重减产。</p>
+
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-top">
+      <span>尺幅千里，卷纳乾坤</span>
+      <span class="center">— 1 / 3 —</span>
+      <span>思接寰宇，笔绘山河</span>
+    </div>
+    <div class="footer-bottom">
+      <span>使用日期：2026年10月26日</span>
+      <span>编辑：曹明环</span>
+      <span>核对：何文静</span>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 第 2 页 ========== -->
+<div class="page">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-title">地理时政周刊 <span>GEO WEEKLY</span></div>
+    </div>
+    <div class="header-right">
+      <div class="issue">第一期</div>
+      <div>2026.10.25</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- 左栏 -->
+    <div>
+
+      <!-- 三、厄尔尼诺必背 -->
+      <div class="section">
         <p><span class="label">太平洋西岸（印尼、澳大利亚、东南亚）：</span>海温相对降低，上升气流减弱，盛行下沉气流，持续干旱、森林火灾频发。</p>
         <h3>4. 对我国气候高考高频影响</h3>
         <p>当年冬季：冬季风偏弱，全国易出现暖冬。</p>
-        <p>次年夏季：西太平洋副高偏强、偏南；夏季风偏弱；雨带长期滞留南方 → 南涝北旱；西北太平洋海温偏低 → 台风生成数量偏少。</p>
+        <p>次年夏季：西太平洋副高偏弱、偏南；夏季风偏弱；雨带长期滞留南方 → 南涝北旱；西北太平洋海温偏低 → 台风生成数量偏少。</p>
       </div>
-
-    </div>
-
-    <!-- 右栏 -->
-    <div>
 
       <!-- 四、拉尼娜必背 -->
       <div class="section">
@@ -424,6 +345,11 @@
         <p>次年夏季：副高偏北、夏季风偏强，雨带北移迅速 → 南旱北涝；西北太平洋海温偏高，热力条件充足 → 台风数量偏多、登陆偏多。</p>
       </div>
 
+    </div>
+
+    <!-- 右栏 -->
+    <div>
+
       <!-- 五、易错坑 -->
       <div class="section">
         <div class="section-title">
@@ -435,49 +361,6 @@
         <div class="trap"><span class="x">✕</span><span class="t">渔场变化核心原因是营养盐变化，不是单纯水温高低。</span></div>
         <div class="trap"><span class="x">✕</span><span class="t">我国旱涝灾害多出现于事件次年夏季，切忌时间错位。</span></div>
       </div>
-
-      <!-- 配图预留 -->
-      <div class="img-ph">
-        <div class="title">图 · 沃克环流示意图</div>
-        <div>正常 / 厄尔尼诺 / 拉尼娜 三图对比</div>
-      </div>
-
-    </div>
-  </div>
-
-  <div class="footer">
-    <div class="footer-top">
-      <span>尺幅千里，卷纳乾坤</span>
-      <span class="center">— 1 / 2 —</span>
-      <span>思接寰宇，笔绘山河</span>
-    </div>
-    <div class="footer-bottom">
-      <span>地理限时训练</span>
-      <span>使用日期：2026年10月26日</span>
-      <span>编辑：曹明环</span>
-      <span>核对：何文静</span>
-    </div>
-  </div>
-</div>
-
-<!-- ========== 第 2 页 ========== -->
-<div class="page">
-
-  <div class="header">
-    <div class="header-left">
-      <div class="logo-box">LOGO</div>
-      <div class="header-title">地理时政周刊 <span>GEO WEEKLY</span></div>
-    </div>
-    <div class="header-right">
-      <div class="issue">第一期</div>
-      <div>2026.10.25</div>
-    </div>
-  </div>
-
-  <div class="content">
-
-    <!-- 左栏 -->
-    <div>
 
       <!-- 六、答题模板 -->
       <div class="section">
@@ -499,6 +382,41 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-top">
+      <span>尺幅千里，卷纳乾坤</span>
+      <span class="center">— 2 / 3 —</span>
+      <span>思接寰宇，笔绘山河</span>
+    </div>
+    <div class="footer-bottom">
+      <span>使用日期：2026年10月26日</span>
+      <span>编辑：曹明环</span>
+      <span>核对：何文静</span>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 第 3 页 ========== -->
+<div class="page">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-title">地理时政周刊 <span>GEO WEEKLY</span></div>
+    </div>
+    <div class="header-right">
+      <div class="issue">第一期</div>
+      <div>2026.10.25</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- 左栏 -->
+    <div>
+
       <!-- 七、时政衔接 -->
       <div class="section">
         <div class="section-title">
@@ -510,7 +428,7 @@
         </div>
       </div>
 
-      <!-- 本期学习要求 -->
+      <!-- 八、学习要求 -->
       <div class="section">
         <div class="section-title">
           <span class="num">八</span>
@@ -521,25 +439,12 @@
         <div class="req">3. 掌握"海气相互作用→环流变化→气候灾害"完整因果链。</div>
       </div>
 
-      <!-- 姓名学号 -->
-      <div class="name-row">
-        <span>姓名：</span>
-        <span>学号：</span>
-      </div>
-
-    </div>
-
-    <!-- 右栏 -->
-    <div>
-
-      <!-- 八、配套习题 -->
+      <!-- 九、选择题 -->
       <div class="section">
         <div class="section-title">
           <span class="num">九</span>
-          <h2>配套高考真题变式习题（含标准答案）</h2>
+          <h2>配套习题 · 选择题</h2>
         </div>
-
-        <h3>一、选择题</h3>
         <div class="quiz">
           <p><strong>1. 厄尔尼诺现象发生期间，赤道太平洋区域正确的是（  ）</strong></p>
           <p>A. 东南信风增强，沃克环流加强<br>
@@ -556,8 +461,19 @@
              D. 我国次年夏季南涝北旱</p>
           <p><span class="ans">答案：C</span> <span class="exp">解析：拉尼娜冷冬、台风偏多、次年南旱北涝、秘鲁渔获增产。</span></p>
         </div>
+      </div>
 
-        <h3>二、综合大题（高考 8+6+6 分标准题型）</h3>
+    </div>
+
+    <!-- 右栏 -->
+    <div>
+
+      <!-- 综合大题 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="num">十</span>
+          <h2>配套习题 · 综合大题</h2>
+        </div>
         <div class="quiz">
           <p>阅读材料，完成问题：</p>
           <p>沃克环流是赤道太平洋纬向热力环流，海温异常会引发厄尔尼诺、拉尼娜现象，深刻影响全球气候与海洋生态。</p>
@@ -576,11 +492,10 @@
   <div class="footer">
     <div class="footer-top">
       <span>尺幅千里，卷纳乾坤</span>
-      <span class="center">— 2 / 2 —</span>
+      <span class="center">— 3 / 3 —</span>
       <span>思接寰宇，笔绘山河</span>
     </div>
     <div class="footer-bottom">
-      <span>地理限时训练</span>
       <span>使用日期：2026年10月26日</span>
       <span>编辑：曹明环</span>
       <span>核对：何文静</span>

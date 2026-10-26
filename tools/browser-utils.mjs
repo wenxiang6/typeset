@@ -176,6 +176,31 @@ export async function waitSettled(page, timeout = 12000) {
   }
 }
 
+/** 等页面里的图片解码完成、字体就绪，否则截图会拍到空白/破图 */
+export async function waitImages(page, timeout = 4000) {
+  try {
+    await page.evaluate(async (ms) => {
+      const imgs = [...document.querySelectorAll('.ed-page img')]
+      await Promise.all(
+        imgs.map((img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise((r) => {
+                img.addEventListener('load', r, { once: true })
+                img.addEventListener('error', r, { once: true })
+                setTimeout(r, ms)
+              }),
+        ),
+      )
+      if (document.fonts?.ready) await document.fonts.ready
+    }, timeout)
+    // 再等解码落一帧
+    await sleep(120)
+  } catch {
+    /* 忽略：等待失败不影响截图 */
+  }
+}
+
 export async function readState(page) {
   return page.evaluate(() => {
     const api = window.__paibanApi

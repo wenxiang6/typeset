@@ -18,11 +18,29 @@ function toHex(c?: string): string {
   return '#ffffff'
 }
 
-function Num({ label, value, onChange, step = 1 }: { label: string; value: number; onChange: (v: number) => void; step?: number }) {
+function Num({
+  label,
+  value,
+  onChange,
+  step = 1,
+  disabled,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  step?: number
+  disabled?: boolean
+}) {
   return (
     <label className="ed-num">
       <span>{label}</span>
-      <input type="number" value={Math.round(value * 10) / 10} step={step} onChange={(e) => onChange(parseFloat(e.target.value) || 0)} />
+      <input
+        type="number"
+        value={Math.round(value * 10) / 10}
+        step={step}
+        disabled={disabled}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+      />
     </label>
   )
 }
@@ -279,14 +297,14 @@ export function Inspector({ api }: { api: EditorApi }) {
       <div className="ed-insp-body">
         {furniture && (
           <div className="ed-insp-note">
-            页眉 / 报头 / 页脚是页面固定件：移动范围限定在页边区域，不会改变正文版心，也不会把整页内容挤走。修改页眉/页脚的内容、字体、线宽、尺寸会同步到所有页（页脚页码仍按页更新）。
+            页眉 / 报头 / 页脚是页面固定件：<strong>不能拖动</strong>（避免误碰把整页内容挤走），但可以选中改字体/字号/线宽，或直接<strong>双击改文字</strong>。改动会同步到所有页（页脚页码仍按页更新）。
           </div>
         )}
         <div className="ed-insp-grid">
-          <Num label="X" value={sel.x} onChange={(v) => setRect({ x: v })} />
-          <Num label="Y" value={sel.y} onChange={(v) => setRect({ y: v })} />
-          <Num label="宽" value={sel.w} onChange={(v) => setRect({ w: Math.max(8, v) })} />
-          <Num label="高" value={sel.h} onChange={(v) => setRect({ h: Math.max(8, v) })} />
+          <Num label="X" value={sel.x} onChange={(v) => setRect({ x: v })} disabled={sel.locked} />
+          <Num label="Y" value={sel.y} onChange={(v) => setRect({ y: v })} disabled={sel.locked} />
+          <Num label="宽" value={sel.w} onChange={(v) => setRect({ w: Math.max(8, v) })} disabled={sel.locked} />
+          <Num label="高" value={sel.h} onChange={(v) => setRect({ h: Math.max(8, v) })} disabled={sel.locked} />
         </div>
 
         {subParts.length >= 2 && sel.variant !== 'ulist' && sel.variant !== 'olist' && sel.variant !== 'chain' && (
@@ -597,13 +615,14 @@ export function Inspector({ api }: { api: EditorApi }) {
 
         <div className="ed-insp-row">
           <button
-            disabled={selPageIdx <= 0}
+            disabled={sel.locked || selPageIdx <= 0}
             onClick={() => api.moveElToPage(sel.id, selPageIdx - 1)}
             data-tip="<b>移到上一页</b>把当前组件整体搬到上一页顶部"
           >
             ← 上一页
           </button>
           <button
+            disabled={sel.locked}
             onClick={() => api.moveElToNextPage(sel.id)}
             data-tip="<b>移到下一页</b>把当前组件整体搬到下一页顶部，后续内容自动下推"
           >
@@ -620,7 +639,7 @@ export function Inspector({ api }: { api: EditorApi }) {
             ))}
           </select>
           <button
-            disabled={targetPage === selPageIdx}
+            disabled={sel.locked || targetPage === selPageIdx}
             onClick={() => api.moveElToPageAt(sel.id, targetPage, sel.x, sel.y)}
             data-tip="<b>移到指定页</b>按当前位置搬到目标页，原页自动补空、目标页自动下推"
           >

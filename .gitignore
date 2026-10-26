@@ -1,0 +1,13 @@
+# 依赖与产物
+node_modules/
+dist/
+artifacts/
+.DS_Store
+
+# 桌面版打包产物与缓存
+release/
+build/icon.png
+.cache/
+
+# Word 导入抽出的图片（每次导入按时间戳生成，7 天后自动清理）
+public/images/imported/

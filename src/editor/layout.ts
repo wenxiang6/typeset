@@ -365,6 +365,103 @@ export function resolveMove(
  * 纵向压缩：消除同栏重叠，保持现有间距，不改变上下顺序
  * ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ *
+ * 与相邻组件交换位置（方向键）
+ * ------------------------------------------------------------------ */
+
+export type SwapDir = 'up' | 'down' | 'left' | 'right'
+
+/** 两个矩形在某个轴上的投影重叠比例（相对较窄的一方） */
+function overlapRatio(a: Rect, b: Rect, axis: 'x' | 'y') {
+  if (axis === 'x') {
+    const o = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+    return o <= 0 ? 0 : o / Math.max(1, Math.min(a.w, b.w))
+  }
+  const o = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+  return o <= 0 ? 0 : o / Math.max(1, Math.min(a.h, b.h))
+}
+
+/** 该方向上最近的可交换内容块（忽略页眉/报头/页脚、背景、区域框、锁定件） */
+export function findNeighbor(doc: Doc, pageIdx: number, id: string, dir: SwapDir): El | null {
+  const page = doc.pages[pageIdx]
+  if (!page) return null
+  const cur = page.els.find((e) => e.id === id)
+  if (!cur || !isFlowable(cur) || cur.background || cur.locked) return null
+
+  const vertical = dir === 'up' || dir === 'down'
+  const tol = 2
+  const cands = page.els.filter(
+    (e) => e.id !== id && isFlowable(e) && !e.background && !e.locked && !isFurniture(e) && e.kind !== 'region',
+  )
+  const near = cands.filter((e) => {
+    if (vertical) {
+      if (overlapRatio(cur, e, 'x') < 0.3) return false
+      return dir === 'up' ? e.y + e.h <= cur.y + tol : e.y >= cur.y + cur.h - tol
+    }
+    if (overlapRatio(cur, e, 'y') < 0.3) return false
+    return dir === 'left' ? e.x + e.w <= cur.x + tol : e.x >= cur.x + cur.w - tol
+  })
+  if (!near.length) return null
+
+  const dist = (e: El) => {
+    if (dir === 'up') return cur.y - (e.y + e.h)
+    if (dir === 'down') return e.y - (cur.y + cur.h)
+    if (dir === 'left') return cur.x - (e.x + e.w)
+    return e.x - (cur.x + cur.w)
+  }
+  near.sort((a, b) => dist(a) - dist(b) || a.z - b.z)
+  return near[0]
+}
+
+/**
+ * 与相邻块互换阅读顺序位置。
+ *
+ * 只交换「顺序」，不改变两者合起来占用的总空间（cur.h + gap + other.h），
+ * 所以交换后不会压到更下面的内容，也不需要重排整页。
+ * 水平方向两者宽度不同时，交换后若越出版心就直接放弃（返回 null）。
+ *
+ * @returns 被交换的另一个元素 id；没有可交换对象时返回 null
+ */
+export function swapWithNeighbor(doc: Doc, pageIdx: number, id: string, dir: SwapDir): string | null {
+  const page = doc.pages[pageIdx]
+  if (!page) return null
+  const cur = page.els.find((e) => e.id === id)
+  const other = findNeighbor(doc, pageIdx, id, dir)
+  if (!cur || !other) return null
+
+  if (dir === 'up' || dir === 'down') {
+    const gap = dir === 'up' ? Math.max(0, cur.y - (other.y + other.h)) : Math.max(0, other.y - (cur.y + cur.h))
+    if (dir === 'up') {
+      const oy = other.y
+      cur.y = oy
+      other.y = oy + cur.h + gap
+    } else {
+      const cy = cur.y
+      other.y = cy
+      cur.y = cy + other.h + gap
+    }
+    return other.id
+  }
+
+  const g = getGeometry(doc, pageIdx)
+  const gap = dir === 'left' ? Math.max(0, cur.x - (other.x + other.w)) : Math.max(0, other.x - (cur.x + cur.w))
+  if (dir === 'left') {
+    // 邻居在左 → 交换后当前块在左
+    const nx = other.x
+    const nox = other.x + cur.w + gap
+    if (nx < g.left - 0.5 || nox + other.w > g.right + 0.5) return null
+    cur.x = nx
+    other.x = nox
+  } else {
+    const nox = cur.x
+    const nx = cur.x + other.w + gap
+    if (nox < g.left - 0.5 || nx + cur.w > g.right + 0.5) return null
+    other.x = nox
+    cur.x = nx
+  }
+  return other.id
+}
+
 export function compactPage(doc: Doc, pageIdx: number): boolean {
   const page = doc.pages[pageIdx]
   if (!page) return false
@@ -543,55 +640,31 @@ export function reflowDoc(doc: Doc, opts: { compact?: boolean } = {}): Doc {
       if (compact && compactPage(doc, i)) changed = true
       let g = getGeometry(doc, i)
 
-      if (i === 0) {
-        // 第一页：左右栏都是初始设计内容。溢出统一进入第二页左栏，
-        // 先插右栏、再插左栏，保证“左栏内容在右栏内容之前”。
-        g = getGeometry(doc, i)
-        const right0 = findColumnOverflow(doc, i, 1)
-        if (right0.length) {
-          const ids = new Set(right0.map((e) => e.id))
-          doc.pages[i].els = doc.pages[i].els.filter((e) => !ids.has(e.id))
-          for (const el of right0) if (el.h > g.height) el.h = g.height
-          ensurePage(doc, i + 1)
-          insertAtTopInColumn(doc, i + 1, right0, 0)
-          changed = true
-          if (++moveGuard > 500) break
-        }
-        g = getGeometry(doc, i)
-        const left0 = findColumnOverflow(doc, i, 0)
-        if (left0.length) {
-          const ids = new Set(left0.map((e) => e.id))
-          doc.pages[i].els = doc.pages[i].els.filter((e) => !ids.has(e.id))
-          for (const el of left0) if (el.h > g.height) el.h = g.height
-          ensurePage(doc, i + 1)
-          insertAtTopInColumn(doc, i + 1, left0, 0)
-          changed = true
-          if (++moveGuard > 500) break
-        }
-      } else {
-        // 后续页：左栏溢出 → 同一页右栏；右栏溢出 → 下一页左栏。
-        g = getGeometry(doc, i)
-        const left = findColumnOverflow(doc, i, 0)
-        if (left.length) {
-          const ids = new Set(left.map((e) => e.id))
-          doc.pages[i].els = doc.pages[i].els.filter((e) => !ids.has(e.id))
-          for (const el of left) if (el.h > g.height) el.h = g.height
-          insertAtTopInColumn(doc, i, left, 1)
-          changed = true
-          if (++moveGuard > 500) break
-        }
+      /* 横版是「页内左栏 → 页内右栏 → 下一页左栏」的连续流，第一页也不例外。
+       * 以前第一页是特例（左右栏任一溢出都直接进第二页左栏），那是按「第一页两栏
+       * 都是设计好的固定内容」假设写的；一旦左栏内容变长，右栏还空着就整块跳到
+       * 下一页，阅读顺序也会乱。现在统一成标准分栏流。 */
+      g = getGeometry(doc, i)
+      const left = findColumnOverflow(doc, i, 0)
+      if (left.length) {
+        const ids = new Set(left.map((e) => e.id))
+        doc.pages[i].els = doc.pages[i].els.filter((e) => !ids.has(e.id))
+        for (const el of left) if (el.h > g.height) el.h = g.height
+        insertAtTopInColumn(doc, i, left, 1)
+        changed = true
+        if (++moveGuard > 500) break
+      }
 
-        g = getGeometry(doc, i)
-        const right = findColumnOverflow(doc, i, 1)
-        if (right.length) {
-          const ids = new Set(right.map((e) => e.id))
-          doc.pages[i].els = doc.pages[i].els.filter((e) => !ids.has(e.id))
-          for (const el of right) if (el.h > g.height) el.h = g.height
-          ensurePage(doc, i + 1)
-          insertAtTopInColumn(doc, i + 1, right, 0)
-          changed = true
-          if (++moveGuard > 500) break
-        }
+      g = getGeometry(doc, i)
+      const right = findColumnOverflow(doc, i, 1)
+      if (right.length) {
+        const ids = new Set(right.map((e) => e.id))
+        doc.pages[i].els = doc.pages[i].els.filter((e) => !ids.has(e.id))
+        for (const el of right) if (el.h > g.height) el.h = g.height
+        ensurePage(doc, i + 1)
+        insertAtTopInColumn(doc, i + 1, right, 0)
+        changed = true
+        if (++moveGuard > 500) break
       }
 
       // 跨栏元素溢出 → 下一页整幅顶部
@@ -620,15 +693,22 @@ export function reflowDoc(doc: Doc, opts: { compact?: boolean } = {}): Doc {
 
 /**
  * heights: elementId -> 真实内容高度（由 Canvas 在 DOM 里测量）
+ *
+ * opts.growLocked：对 `autoHeight: false`（手动锁高）的元素，只在内容确实
+ * 装不下时向上长高，绝不缩回 —— 这样「拖窄 → 文字变多 → 框自动变高」成立，
+ * 同时用户手动调大的高度不会被自动测量改小。
  */
-export function applyHeights(doc: Doc, heights: Record<string, number>): Doc {
+export function applyHeights(doc: Doc, heights: Record<string, number>, opts: { growLocked?: boolean } = {}): Doc {
   let changed = false
   for (let i = 0; i < doc.pages.length; i++) {
     for (const el of doc.pages[i].els) {
-      if (!isMeasurable(el) || el.autoHeight === false) continue
+      if (!isMeasurable(el)) continue
       const h = heights[el.id]
       if (typeof h !== 'number' || !isFinite(h) || h <= 0) continue
       const next = Math.max(8, Math.ceil(h))
+      if (el.autoHeight === false) {
+        if (!opts.growLocked || next <= el.h + 1) continue
+      }
       if (Math.abs(next - el.h) > 0.6) {
         el.h = next
         changed = true

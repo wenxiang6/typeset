@@ -1,8 +1,11 @@
 {
   "name": "geo-weekly-paiban",
+  "productName": "地理周刊排版",
   "private": true,
   "version": "0.1.0",
+  "description": "地理时政周刊排版编辑器（桌面版）",
   "type": "module",
+  "main": "electron/main.cjs",
   "packageManager": "pnpm@12.11.2",
   "scripts": {
     "dev": "vite",
@@ -10,9 +13,19 @@
     "build:http": "vite build",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
+    "import:verify": "node tools/import/verify.mjs",
+    "import:debug": "node tools/import/cli.mjs",
     "preview": "vite preview",
     "mcp": "node tools/paiban-mcp/server.mjs",
-    "mcp:selftest": "node tools/paiban-mcp/selftest.mjs"
+    "mcp:selftest": "node tools/paiban-mcp/selftest.mjs",
+    "app": "electron .",
+    "app:dev": "vite build && electron .",
+    "icon": "node scripts/make-icon.mjs",
+    "dist:mac": "vite build && node scripts/make-icon.mjs && electron-builder --mac",
+    "dist:win": "vite build && node scripts/make-icon.mjs && electron-builder --win",
+    "dist:win:portable": "vite build && node scripts/pack-win.mjs",
+    "dist:mac:arm": "vite build && node scripts/make-icon.mjs && electron-builder --mac --arm64",
+    "desktop:check": "node scripts/desktop-check.mjs"
   },
   "dependencies": {
     "react": "^19.3.0",
@@ -22,13 +35,100 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^38.8.6",
+    "electron-builder": "^26.18.0",
     "playwright-core": "^1.64.1",
     "typescript": "^5.9.0",
     "vite": "^7.1.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "electron",
+      "electron-winstaller"
     ]
-  }
+  },
+  "build": {
+    "appId": "cn.wenxiang.paiban",
+    "productName": "地理周刊排版",
+    "copyright": "内部排版工具",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "tools/import/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "darkModeSupport": false,
+      "identity": null,
+      "artifactName": "地理周刊排版-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "地理周刊排版 ${version}",
+      "contents": [
+        {
+          "x": 140,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "地理周刊排版",
+      "artifactName": "地理周刊排版-${version}-安装版.${ext}"
+    },
+    "portable": {
+      "artifactName": "地理周刊排版-${version}-便携版.${ext}"
+    },
+    "afterPack": "scripts/sign-adhoc.cjs"
+  },
+  "author": {
+    "name": "wenxiang"
+  },
+  "license": "MIT"
 }

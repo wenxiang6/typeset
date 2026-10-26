@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor } from './store'
 import { rememberSelection } from './format'
+import { openPrintPreview } from './print'
 import './tooltip.css'
 import { Toolbar } from './Toolbar'
 import { FormatBar } from './FormatBar'
@@ -17,8 +18,17 @@ function isTyping() {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
 }
 
+/** 桌面版（Electron）通过预加载脚本注入的桥；网页版没有 */
+interface DesktopBridge {
+  platform?: string
+  onPrint?: (cb: () => void) => void
+  onOpenJson?: (cb: () => void) => void
+}
+
 export function EditorApp() {
   const api = useEditor()
+  const apiRef = useRef(api)
+  apiRef.current = api
 
   // 暴露给自动化测试 / 调试（浏览器控制台可直接查看编辑器状态）
   useEffect(() => {
@@ -33,6 +43,20 @@ export function EditorApp() {
     const onSel = () => rememberSelection()
     document.addEventListener('selectionchange', onSel)
     return () => document.removeEventListener('selectionchange', onSel)
+  }, [])
+
+  // 桌面版：接系统菜单的「打印预览」「打开版面 JSON」
+  useEffect(() => {
+    const bridge = (window as unknown as { paibanDesktop?: DesktopBridge }).paibanDesktop
+    if (!bridge) return
+    bridge.onPrint?.(() => {
+      const cur = apiRef.current
+      document.body.classList.remove('ed-bw-preview')
+      openPrintPreview({ w: cur.doc.w, h: cur.doc.h, orientation: cur.doc.orientation ?? 'landscape' })
+    })
+    bridge.onOpenJson?.(() => {
+      document.querySelector<HTMLInputElement>('input[accept="application/json"]')?.click()
+    })
   }, [])
 
   // 全局悬浮提示（data-tip）：悬浮 0.25s 后弹出 WPS 风格功能介绍
@@ -132,22 +156,35 @@ export function EditorApp() {
         api.removeEl(api.selection)
         return
       }
-      // 方向键 1px 微调，Shift+方向键 10px；不做自动补齐，避免被吸回原位
+      /* 方向键 = 与上下左右最近的相邻组件交换位置；
+       * Alt / Option + 方向键 = 微调 1px，再按 Shift 变 10px。
+       * 选中了复合组件的内部元素时，方向键仍然只微调那个内部元素。 */
+      const swapDirs: Record<string, 'up' | 'down' | 'left' | 'right'> = {
+        ArrowLeft: 'left',
+        ArrowRight: 'right',
+        ArrowUp: 'up',
+        ArrowDown: 'down',
+      }
+      const dir = swapDirs[e.key]
+      if (!dir) return
+      e.preventDefault()
+
       const step = e.shiftKey ? 10 : 1
-      const map: Record<string, [number, number]> = {
+      const nudgeMap: Record<string, [number, number]> = {
         ArrowLeft: [-step, 0],
         ArrowRight: [step, 0],
         ArrowUp: [0, -step],
         ArrowDown: [0, step],
       }
-      const delta = map[e.key]
-      if (delta) {
-        e.preventDefault()
-        if (api.subSelection) {
-          api.nudgeSub(api.subSelection.elId, api.subSelection.index, delta[0], delta[1])
-        } else {
-          api.nudge(api.selection, delta[0], delta[1])
-        }
+      const delta = nudgeMap[e.key]
+
+      if (api.subSelection) {
+        api.nudgeSub(api.subSelection.elId, api.subSelection.index, delta[0], delta[1])
+      } else if (e.altKey) {
+        // 不做自动补齐，避免被吸回原位
+        api.nudge(api.selection, delta[0], delta[1])
+      } else {
+        api.swapNeighbor(api.selection, dir)
       }
     }
     window.addEventListener('keydown', onKey)

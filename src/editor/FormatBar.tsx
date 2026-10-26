@@ -174,7 +174,7 @@ export function FormatBar({ api }: { api: EditorApi }) {
         <button data-tip="<b>导出 JSON</b>保存整份版面为文件" onClick={() => exportJSON(api.doc)}>
           <IconDownload />
         </button>
-        <button data-tip="<b>打印设置</b>选择彩色/黑白预览后打印或导出 PDF" onClick={() => (document.querySelector('.ed-print-trigger') as HTMLButtonElement | null)?.click()}>
+        <button data-tip="<b>打印预览</b>直接打开预览弹窗，彩色/黑白在弹窗内切换" onClick={() => (document.querySelector('.ed-print-trigger') as HTMLButtonElement | null)?.click()}>
           <IconPrint />
         </button>
       </div>

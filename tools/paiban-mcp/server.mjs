@@ -14,8 +14,10 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { chromium } from 'playwright-core'
 import {
   ARTIFACT_DIR,
+  BASE,
   ROOT,
   closeBrowser,
   ensureServer,
@@ -28,30 +30,79 @@ import {
   waitSettled,
 } from '../browser-utils.mjs'
 
-const SERVER_INFO = { name: 'paiban-mcp', version: '1.0.0' }
+const SERVER_INFO = { name: 'paiban-mcp', version: '1.1.0' }
 const PROTOCOL_VERSION = '2024-11-05'
 
 let rpcBuffer = ''
 let controller = null
+
+/** 给页面挂日志采集：控制台、pageerror、请求失败、4xx/5xx */
+function attachLogs(page, logs) {
+  page.on('console', (m) => {
+    if (m.type() === 'error' || m.type() === 'warning') logs.push({ type: m.type(), text: m.text(), at: Date.now() })
+  })
+  page.on('pageerror', (e) => logs.push({ type: 'pageerror', text: e.stack || String(e), at: Date.now() }))
+  page.on('requestfailed', (r) =>
+    logs.push({ type: 'requestfailed', text: `${r.url()} · ${r.failure()?.errorText ?? 'failed'}`, at: Date.now() }),
+  )
+  page.on('response', (r) => {
+    if (r.status() >= 400) logs.push({ type: 'http', text: `${r.status()} ${r.url()}`, at: Date.now() })
+  })
+  return logs
+}
 
 class Editor {
   constructor() {
     this.page = null
     this.logs = []
     this.server = null
+    this.attached = false
+    this.viaCdp = false
   }
 
+  /**
+   * 两种接入方式：
+   * - PAIBAN_CDP=http://127.0.0.1:9222 → 接管你已打开的 Chrome（不清存档、不重载）
+   * - 否则自己起一个 Chromium，打开 PAIBAN_URL（会清存档，得到干净初始版面）
+   */
   async ensure() {
     if (this.page && !this.page.isClosed()) return
+    this.logs = []
+
+    const cdp = process.env.PAIBAN_CDP
+    if (cdp) {
+      const browser = await chromium.connectOverCDP(cdp)
+      const ctx = browser.contexts()[0] ?? (await browser.newContext())
+      const url = BASE
+      this.page =
+        ctx.pages().find((p) => p.url().startsWith(url.replace(/\/$/, ''))) ??
+        ctx.pages().find((p) => p.url().includes('127.0.0.1:517')) ??
+        (await ctx.newPage())
+      this.viaCdp = true
+      attachLogs(this.page, this.logs)
+      if (!this.page.url().startsWith('http')) await this.page.goto(url, { waitUntil: 'domcontentloaded' })
+      await this.page.waitForFunction(() => !!window.__paibanApi, null, { timeout: 15000 })
+      await waitSettled(this.page)
+      return
+    }
+
     this.server = await ensureServer()
     const { browser } = await launchBrowser()
     const opened = await openEditor(browser)
     this.page = opened.page
     this.logs = opened.logs
+    this.attached = true
   }
 
   async reset() {
     await this.ensure()
+    if (this.viaCdp) {
+      // 接管真实浏览器时不动用户存档，只重新加载页面
+      await this.page.reload({ waitUntil: 'domcontentloaded' })
+      await this.page.waitForFunction(() => !!window.__paibanApi, null, { timeout: 15000 })
+      await waitSettled(this.page)
+      return
+    }
     await resetEditor(this.page)
     await this.page.setViewportSize({ width: 1600, height: 1000 })
   }
@@ -70,6 +121,43 @@ class Editor {
       const fn = new Function('api', `return (async () => { ${code} })()`)
       return fn(window.__paibanApi)
     }, expression)
+  }
+
+  /** 把某一页滚动到可视区（截图用） */
+  async scrollToPage(idx) {
+    await this.page.evaluate((i) => {
+      const node = document.querySelectorAll('.ed-page')[i]
+      if (!node) return
+      const wrap = node.closest('.ed-page-wrap')
+      const scroller = document.querySelector('.ed-canvas-scroll')
+      if (wrap && scroller) {
+        scroller.scrollTop = wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 10
+      }
+    }, idx)
+    await sleep(220)
+  }
+
+  /** 等图片解码 + 字体就绪，否则截出来是破图/回退字体 */
+  async waitImages() {
+    try {
+      await this.page.evaluate(async () => {
+        const imgs = [...document.querySelectorAll('.ed-page img')]
+        await Promise.all(
+          imgs.map((img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((r) => {
+                  img.addEventListener('load', r, { once: true })
+                  img.addEventListener('error', r, { once: true })
+                  setTimeout(r, 4000)
+                }),
+          ),
+        )
+        if (document.fonts?.ready) await document.fonts.ready
+      })
+    } catch {
+      /* 忽略：等待失败不影响截图 */
+    }
   }
 }
 
@@ -119,6 +207,41 @@ const TOOLS = [
         name: { type: 'string', description: '截图文件名（默认 shot-时间戳.png）' },
         fullPage: { type: 'boolean', description: '是否整页截图（默认 false）' },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'paiban_pages_shot',
+    description: '逐页截图（自动滚动到每一页），保存到 artifacts/smoke/pages-N.png 并返回路径列表，方便和成品 PDF 逐页对比。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prefix: { type: 'string', description: '文件名前缀（默认 pages）' },
+        max: { type: 'number', description: '最多截几页（默认 8）' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'paiban_import_word',
+    description:
+      '导入本机 Word 原稿：读文件 → 走 /@doc-import 解析 → 在页面生成版面（可 Ctrl+Z 撤销）。返回页数、组件数、警告；orientation 选导入成横版还是竖版，merge 控制短条目（学习要求/必考能力/易错项）合并还是拆分。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '原稿绝对路径（.doc / .docx / .rtf）' },
+        orientation: {
+          type: 'string',
+          enum: ['landscape', 'portrait'],
+          description: '目标版式：landscape A4 横版（默认）；portrait A4 竖版，直接按竖版栏宽装栏',
+        },
+        merge: {
+          type: 'string',
+          enum: ['auto', 'merge', 'split'],
+          description: '短条目处理：auto 取页数最少且不被分页切断的方案（默认）；merge 整组一个组件；split 逐条独立',
+        },
+      },
+      required: ['path'],
       additionalProperties: false,
     },
   },
@@ -243,6 +366,89 @@ async function toolResult(name, args = {}) {
       return {
         text: `截图已保存：${path.relative(ROOT, file)}`,
         images: [{ type: 'image', data, mimeType: 'image/png' }],
+      }
+    }
+
+    case 'paiban_pages_shot': {
+      await ed.ensure()
+      const s = await ed.state()
+      const prefix = (args.prefix || 'pages').replace(/[^\w.-]/g, '')
+      const max = Math.min(Math.max(1, Number(args.max) || 8), 20)
+      await fs.mkdir(ARTIFACT_DIR, { recursive: true })
+      await ed.waitImages()
+      const files = []
+      const images = []
+      for (let i = 0; i < Math.min(s.pages, max); i++) {
+        await ed.scrollToPage(i)
+        const file = path.join(ARTIFACT_DIR, `${prefix}-${i + 1}.png`)
+        await ed.page.screenshot({ path: file })
+        files.push(path.relative(ROOT, file))
+        // 只内联第 1 页，避免一次返回几十 MB
+        if (i === 0) images.push({ type: 'image', data: (await fs.readFile(file)).toString('base64'), mimeType: 'image/png' })
+      }
+      return { text: `共 ${s.pages} 页，截图：\n${files.join('\n')}`, images }
+    }
+
+    case 'paiban_import_word': {
+      await ed.ensure()
+      if (!args.path) throw new Error('path 不能为空')
+      const abs = path.resolve(String(args.path).replace(/^~/, process.env.HOME || ''))
+      const buf = await fs.readFile(abs)
+      const endpoint = new URL('/@doc-import', BASE.endsWith('/') ? BASE : `${BASE}/`)
+      const res = await fetch(endpoint, { method: 'POST', body: buf, headers: { 'Content-Type': 'application/octet-stream' } })
+      const payload = await res.json().catch(() => null)
+      if (!payload || !payload.ok) throw new Error(payload?.error || `解析失败（HTTP ${res.status}）`)
+
+      const result = await ed.page.evaluate(
+        async ([p, merge, orientation]) => {
+          const fn = window.__paibanImport
+          if (typeof fn !== 'function') throw new Error('页面没有暴露 __paibanImport，请刷新编辑器后再试')
+          const built = await fn(p, { merge, orientation })
+          window.__paibanApi.importDoc(built.doc)
+          return {
+            pageCount: built.pageCount,
+            elements: built.doc.pages.reduce((n, pg) => n + pg.els.length, 0),
+            warnings: built.warnings,
+            paragraphs: p.paragraphs,
+            merge: built.merge,
+            profile: built.profile,
+            groups: built.groups,
+            orientation: built.orientation,
+          }
+        },
+        [payload, args.merge ?? 'auto', args.orientation === 'portrait' ? 'portrait' : 'landscape'],
+      )
+      await waitSettled(ed.page)
+      await ed.waitImages()
+      const after = await ed.state()
+      return {
+        text: JSON.stringify(
+          {
+            ok: true,
+            file: path.basename(abs),
+            elapsedMs: payload.elapsed,
+            paragraphs: result.paragraphs,
+            components: payload.elements.length,
+            docElements: result.elements,
+            mergeMode: result.merge,
+            packProfile: result.profile,
+            orientation: result.orientation,
+            mergeGroups: result.groups,
+            pages: after.pages,
+            pageCountFromBuild: result.pageCount,
+            images: (payload.images || []).length,
+            warnings: result.warnings,
+            invariants: {
+              outside: after.outside.length,
+              overlaps: after.overlaps.length,
+              overflowing: after.overflowing.length,
+              furnitureOverlaps: after.furnitureOverlaps.length,
+              contentOverflow: after.contentOverflow.length,
+            },
+          },
+          null,
+          2,
+        ),
       }
     }
 

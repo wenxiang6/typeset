@@ -123,6 +123,7 @@ try {
 
   await test('表格组件：改单元格、加行加列', async () => {
     await resetEditor(page)
+    if (process.env.PAIBAN_DBG) console.log('AFTER-RESET', JSON.stringify(await page.evaluate(() => ({ pages: window.__paibanApi.doc.pages.length, total: window.__paibanApi.doc.pages.reduce((n,p)=>n+p.els.length,0), tables: window.__paibanApi.doc.pages.flatMap(p=>p.els).filter(e=>String(e.html||'').includes('<table')).map(e=>e.id) }))))
     await page.locator('.ed-palette-search input').fill('表格')
     await sleep(200)
     await page.locator('.ed-palette-item', { hasText: '表格' }).click()
@@ -634,23 +635,77 @@ try {
     await screenshot(page, '02h-inner.png')
   })
 
-  await test('组件名称识别 + 方向键 1px / Shift 10px 微调', async () => {
+  await test('方向键与相邻组件交换位置（↑↓ 同栏 / ←→ 跨栏）', async () => {
+    await resetEditor(page)
+    const readLeft = () =>
+      page.evaluate(() => {
+        const d = window.__paibanApi.doc
+        const mid = d.w / 2
+        return d.pages[0].els
+          .filter((e) => e.kind !== 'chrome' && e.x < mid)
+          .sort((a, b) => a.y - b.y)
+          .map((e) => ({ id: e.id, y: Math.round(e.y), h: Math.round(e.h) }))
+      })
+    const before = await readLeft()
+    const cur = before[before.length - 1]
+    const prev = before[before.length - 2]
+    const bottom = cur.y + cur.h
+
+    await page.evaluate((id) => window.__paibanApi.setSelection(id), cur.id)
+    await sleep(220)
+    await page.keyboard.press('ArrowUp')
+    await sleep(450)
+    const after = await readLeft()
+    const a = after.find((e) => e.id === cur.id)
+    const b = after.find((e) => e.id === prev.id)
+    assert(a && b, '交换后元素丢失')
+    assert(a.y === prev.y, `按 ↑ 应与上方组件换位：y=${a.y}，应为 ${prev.y}`)
+    assert(a.y + a.h <= b.y + 0.5, `交换后两个组件重叠：${a.y}+${a.h} > ${b.y}`)
+    assert(Math.abs(b.y + b.h - bottom) <= 1, `交换后总底边应保持不变：${b.y + b.h} 应为 ${bottom}`)
+
+    await page.keyboard.press('ArrowDown')
+    await sleep(450)
+    const back = await readLeft()
+    assert(back.find((e) => e.id === cur.id)?.y === cur.y, '按 ↓ 没有换回原位')
+    assertInvariants(await readState(page), '方向键交换后')
+
+    // 跨栏：左栏第一块按 → 换到右栏同高的那块
+    const lr = await page.evaluate(() => {
+      const d = window.__paibanApi.doc
+      const mid = d.w / 2
+      const body = d.pages[0].els.filter((e) => e.kind !== 'chrome')
+      const left = body.filter((e) => e.x < mid).sort((a, b) => a.y - b.y)[0]
+      const right = body.filter((e) => e.x >= mid).sort((a, b) => a.y - b.y)[0]
+      return {
+        left: { id: left.id, x: Math.round(left.x) },
+        right: { id: right.id, x: Math.round(right.x) },
+      }
+    })
+    await page.evaluate((id) => window.__paibanApi.setSelection(id), lr.left.id)
+    await sleep(220)
+    await page.keyboard.press('ArrowRight')
+    await sleep(450)
+    const nx = await page.evaluate((id) => Math.round(window.__paibanApi.doc.pages[0].els.find((e) => e.id === id).x), lr.left.id)
+    assert(Math.abs(nx - lr.right.x) <= 1, `按 → 应换到右栏 x=${lr.right.x}，实际 ${nx}`)
+    assertInvariants(await readState(page), '跨栏交换后')
+    await screenshot(page, '02d-swap.png')
+  })
+
+  await test('组件名称识别 + Alt+方向键 1px / Alt+Shift 10px 微调', async () => {
     await resetEditor(page)
     await page.locator('[data-el-id="p0-3"]').click()
     await sleep(250)
     const title1 = await page.locator('.ed-insp-title').innerText()
     assert(title1.includes('正文'), `属性栏没有显示组件名：${title1}`)
     const x0 = await page.evaluate(() => window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === 'p0-3')?.x ?? 0)
-    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('Alt+ArrowRight')
     await sleep(200)
     const x1 = await page.evaluate(() => window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === 'p0-3')?.x ?? 0)
-    assert(Math.abs(x1 - x0 - 1) < 0.01, `方向键应移动 1px，实际 ${x1 - x0}`)
-    await page.keyboard.down('Shift')
-    await page.keyboard.press('ArrowRight')
-    await page.keyboard.up('Shift')
+    assert(Math.abs(x1 - x0 - 1) < 0.01, `Alt+方向键应移动 1px，实际 ${x1 - x0}`)
+    await page.keyboard.press('Alt+Shift+ArrowRight')
     await sleep(200)
     const x2 = await page.evaluate(() => window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === 'p0-3')?.x ?? 0)
-    assert(Math.abs(x2 - x1 - 10) < 0.01, `Shift+方向键应移动 10px，实际 ${x2 - x1}`)
+    assert(Math.abs(x2 - x1 - 10) < 0.01, `Alt+Shift+方向键应移动 10px，实际 ${x2 - x1}`)
 
     await page.locator('[data-el-id="p0-5"]').click()
     await sleep(200)
@@ -662,12 +717,109 @@ try {
     const title3 = await page.locator('.ed-insp-title').innerText()
     assert(title3.includes('页脚'), `属性栏组件名错误：${title3}`)
     const fy0 = await page.evaluate(() => window.__paibanApi.doc.pages[0].els.find((e) => e.id === 'p0-49')?.y ?? 0)
-    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Alt+ArrowDown')
     await sleep(200)
     const fy1 = await page.evaluate(() => window.__paibanApi.doc.pages[0].els.find((e) => e.id === 'p0-49')?.y ?? 0)
-    assert(Math.abs(fy1 - fy0 - 1) < 0.01, `页脚方向键应移动 1px，实际 ${fy1 - fy0}`)
+    assert(Math.abs(fy1 - fy0 - 1) < 0.01, `页脚 Alt+方向键应移动 1px，实际 ${fy1 - fy0}`)
     assertInvariants(await readState(page), '方向键微调后')
     await screenshot(page, '02e-nudge.png')
+  })
+
+  await test('页眉 / 报头 / 页脚：锁定后仍可选中、可双击改文字，但拖不动', async () => {
+    await resetEditor(page)
+    // 导入的文档会把这三件设成 locked（初始模板没锁）：模拟这个状态
+    await page.evaluate(() => {
+      const d = window.__paibanApi.doc
+      for (const e of d.pages[0].els) {
+        if (['header', 'masthead', 'footer'].includes(e.variant)) window.__paibanApi.updateEl(e.id, { locked: true }, false)
+      }
+    })
+    await waitSettled(page, 8000)
+
+    for (const variant of ['header', 'masthead', 'footer']) {
+      const id = await page.evaluate((v) => window.__paibanApi.doc.pages[0].els.find((e) => e.variant === v)?.id ?? null, variant)
+      assert(!!id, `找不到 ${variant}`)
+      await page.evaluate(() => window.__paibanApi.setSelection(null))
+      const box = await page.locator(`.ed-el[data-el-id="${id}"]`).boundingBox()
+      await page.mouse.click(box.x + 14, box.y + 8)
+      await sleep(140)
+      const sel = await page.evaluate(() => window.__paibanApi.selection)
+      assert(sel === id, `${variant} 单击没有选中（selection=${sel}）`)
+
+      // 锁定件不能拖：按住往下拖，位置必须不变
+      const before = await page.evaluate((eid) => {
+        const e = window.__paibanApi.doc.pages.flatMap((p) => p.els).find((x) => x.id === eid)
+        return { x: e.x, y: e.y }
+      }, id)
+      await page.mouse.move(box.x + 14, box.y + 8)
+      await page.mouse.down()
+      for (let i = 1; i <= 8; i++) {
+        await page.mouse.move(box.x + 14, box.y + 8 + 6 * i)
+        await sleep(8)
+      }
+      await page.mouse.up()
+      await waitSettled(page, 8000)
+      const after = await page.evaluate((eid) => {
+        const e = window.__paibanApi.doc.pages.flatMap((p) => p.els).find((x) => x.id === eid)
+        return e ? { x: e.x, y: e.y } : null
+      }, id)
+      assert(after && Math.abs(after.y - before.y) < 0.5, `${variant} 不应被拖动：y ${before.y} → ${after?.y}`)
+    }
+
+    // 双击页眉 → 进入内容编辑
+    const hid = await page.evaluate(() => window.__paibanApi.doc.pages[0].els.find((e) => e.variant === 'header')?.id)
+    await page.evaluate(() => window.__paibanApi.setEditingId(null))
+    await page.locator(`.ed-el[data-el-id="${hid}"]`).dblclick({ position: { x: 14, y: 8 } })
+    await sleep(220)
+    const editingId = await page.evaluate(() => window.__paibanApi.editingId)
+    assert(editingId === hid, `页眉双击没有进入编辑（editingId=${editingId}）`)
+    await page.keyboard.press('Escape')
+    await sleep(150)
+    await screenshot(page, '02c-furniture-select.png')
+  })
+
+  await test('内部元素列表竖排：一行一个', async () => {
+    await resetEditor(page)
+    await page.locator('.ed-el[data-el-id="p0-0"]').click()
+    await sleep(220)
+    const rects = await page.evaluate(() =>
+      [...document.querySelectorAll('.ed-sub-list button')].map((b) => {
+        const r = b.getBoundingClientRect()
+        return { left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width) }
+      }),
+    )
+    assert(rects.length >= 2, `内部元素按钮不足：${rects.length}`)
+    assert(new Set(rects.map((r) => r.left)).size === 1, `内部元素不是竖排：${JSON.stringify(rects)}`)
+    const tops = rects.map((r) => r.top)
+    assert(tops.every((t, i) => i === 0 || t > tops[i - 1]), `内部元素没有纵向排列：${JSON.stringify(tops)}`)
+    assert(new Set(rects.map((r) => r.w)).size === 1, '内部元素按钮宽度不一致（没有占满一行）')
+  })
+
+  await test('锁定高度的文字块：装不下自动长高，框够大则不缩回', async () => {
+    await resetEditor(page)
+    const id = await page.evaluate(
+      () => window.__paibanApi.doc.pages[0].els.find((e) => e.kind === 'text' && e.variant === 'paragraph')?.id ?? null,
+    )
+    assert(!!id, '找不到段落组件')
+
+    // 拖窄 + 锁高到 20px：内容装不下 → 必须自己长高
+    await page.evaluate((eid) => window.__paibanApi.updateEl(eid, { w: 200, h: 20, autoHeight: false }, true), id)
+    await waitSettled(page, 12000)
+    const grew = await page.evaluate((eid) => {
+      const e = window.__paibanApi.doc.pages.flatMap((p) => p.els).find((x) => x.id === eid)
+      return e ? { h: Math.round(e.h), auto: e.autoHeight } : null
+    }, id)
+    assert(grew && grew.h > 40, `锁高文字块应自动长高，实际 h=${grew?.h}`)
+    assert(grew.auto === false, '不应偷偷把锁高改回自适应')
+
+    // 手动把框拉得比内容还高：不能被自动测量缩回去
+    await page.evaluate((eid) => window.__paibanApi.updateEl(eid, { h: 300, autoHeight: false }, true), id)
+    await waitSettled(page, 12000)
+    const kept = await page.evaluate((eid) => {
+      const e = window.__paibanApi.doc.pages.flatMap((p) => p.els).find((x) => x.id === eid)
+      return e ? Math.round(e.h) : null
+    }, id)
+    assert(kept === 300, `框比内容高时应保持 300，实际 ${kept}`)
   })
 
   await test('移动报头不会清空第一页正文', async () => {
@@ -775,6 +927,32 @@ try {
     const h = await page.evaluate(() => window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === 'p0-3')?.h ?? 0)
     assert(h > 100, `文字块应自动增高到 100px 以上，实际 ${h}`)
     await screenshot(page, '03-autogrow.png')
+  })
+
+  await test('左栏溢出：先流到本页右栏（第 1 页也适用）', async () => {
+    await resetEditor(page)
+    const setup = await page.evaluate(() => {
+      const api = window.__paibanApi
+      const d = api.doc
+      const contentW = d.w - 45.3 * 2
+      const colW = (contentW - 14.1) / 2
+      // 先放一个贴在左栏底部的图（addEl 会把尺寸夹进版心），再把高度撑到溢出
+      const id = api.addEl(0, { kind: 'image', variant: 'image', src: '', x: 45.3, y: 700, w: Math.round(colW), h: 100 })
+      api.updateEl(id, { h: 520 }, true)
+      api.reflow()
+      return { id }
+    })
+    await waitSettled(page, 15000)
+    const info = await page.evaluate((id) => {
+      const d = window.__paibanApi.doc
+      return d.pages.flatMap((p, pi) => p.els.filter((e) => e.id === id).map((e) => ({ pi, x: e.x, w: e.w, y: e.y, dw: d.w })))
+    }, setup.id)
+    const st = await readState(page)
+    assert(info.length === 1, '左栏溢出的组件丢失了')
+    assert(info[0].pi === 0, `左栏溢出应先留在第 1 页，实际跑到第 ${info[0].pi + 1} 页`)
+    assert(info[0].x + info[0].w / 2 > info[0].dw / 2, `左栏溢出应进入本页右栏，实际 x=${info[0].x}`)
+    assertInvariants(st, '左栏溢出后')
+    await screenshot(page, '03a-left-column-flow.png')
   })
 
   await test('右栏溢出：整块流到下一页左栏', async () => {
@@ -1009,29 +1187,60 @@ try {
     assert(where.length === 1 && where[0].pi === 1 && where[0].y < 170, `p0-3 翻页位置错误：${JSON.stringify(where)}`)
   })
 
-  await test('打印：彩色/黑白预览、纸张尺寸、无空白页', async () => {
+  await test('打印：点按即开预览、弹窗内切彩色/黑白', async () => {
     await resetEditor(page)
     await page.evaluate(() => document.body.classList.remove('ed-bw-preview'))
     await page.locator('[data-el-id="p0-3"]').click()
     await sleep(200)
+    // 点打印按钮 → 直接打开预览弹窗（不再先弹「选彩色/黑白」的设置浮层）
     await page.locator('.ed-print-trigger').click()
-    await sleep(150)
-    assert(await page.locator('.ed-print-pop').isVisible(), '打印设置浮层没有打开')
-    await page.locator('.ed-print-pop button', { hasText: '黑白预览' }).click()
-    await sleep(150)
-    const bw = await page.evaluate(() => ({
-      cls: document.body.className,
-      filter: getComputedStyle(document.querySelector('.ed-page')).filter,
-      sel: window.__paibanApi.selection,
-    }))
-    assert(bw.cls.includes('ed-bw-preview') && bw.filter.includes('grayscale'), `黑白预览没有生效：${JSON.stringify(bw)}`)
-    assert(bw.sel === 'p0-3', '切换打印预览时选中状态被清除了')
-    await page.locator('.ed-print-pop button', { hasText: '彩色预览' }).click()
-    await sleep(150)
-    const color = await page.evaluate(() => ({ cls: document.body.className, filter: getComputedStyle(document.querySelector('.ed-page')).filter }))
-    assert(!color.cls.includes('ed-bw-preview') && color.filter === 'none', `彩色预览没有恢复：${JSON.stringify(color)}`)
-    await page.locator('.ed-print-trigger').click()
+    await page.waitForFunction(
+      () => !!document.querySelector('#ed-print-preview iframe')?.contentDocument?.querySelector('.ed-page-wrap'),
+      null,
+      { timeout: 15000 },
+    )
+    assert((await page.locator('.ed-print-pop').count()) === 0, '不应再出现打印设置浮层')
 
+    const readMode = () =>
+      page.evaluate(() => {
+        const d = document.querySelector('#ed-print-preview iframe').contentDocument
+        const p0 = d.querySelector('.ed-page')
+        return {
+          filter: getComputedStyle(p0).filter,
+          colorOn: d.getElementById('pv-mode-color').classList.contains('is-on'),
+          bwOn: d.getElementById('pv-mode-bw').classList.contains('is-on'),
+          label: d.getElementById('pv-mode-label').textContent,
+          sel: window.__paibanApi.selection,
+          editorFilter: getComputedStyle(document.querySelector('.ed-page')).filter,
+        }
+      })
+    const clickMode = (id) =>
+      page.evaluate((btnId) => document.querySelector('#ed-print-preview iframe').contentDocument.getElementById(btnId).click(), id)
+
+    const initial = await readMode()
+    assert(initial.filter === 'none' && initial.colorOn && initial.label === '彩色', `默认应为彩色：${JSON.stringify(initial)}`)
+
+    await clickMode('pv-mode-bw')
+    await sleep(150)
+    const bw = await readMode()
+    assert(bw.filter.includes('grayscale') && bw.bwOn && bw.label === '黑白', `弹窗内黑白没生效：${JSON.stringify(bw)}`)
+    assert(bw.sel === 'p0-3', '切换预览配色时选中状态被清除了')
+    assert(bw.editorFilter === 'none', `切换预览配色不应把编辑器画布变灰：${bw.editorFilter}`)
+
+    await clickMode('pv-mode-color')
+    await sleep(150)
+    const color = await readMode()
+    assert(color.filter === 'none' && color.colorOn && color.label === '彩色', `切回彩色失败：${JSON.stringify(color)}`)
+
+    await clickMode('print-close')
+    await sleep(200)
+    assert(await page.evaluate(() => !document.getElementById('ed-print-preview')), '预览弹窗未能关闭')
+  })
+
+  await test('打印媒体：纸张尺寸、无空白页', async () => {
+    await resetEditor(page)
+    await page.locator('[data-el-id="p0-3"]').click()
+    await sleep(150)
     const dims = await page.evaluate(() => ({ w: window.__paibanApi.doc.w, h: window.__paibanApi.doc.h, pages: window.__paibanApi.doc.pages.length }))
     await page.emulateMedia({ media: 'print' })
     await sleep(250)
@@ -1067,17 +1276,19 @@ try {
     assert(selectionAfterPrint === 'p0-3', `打印预览后选中状态丢失：${selectionAfterPrint}`)
   })
 
-  await test('应用内打印预览：A4、彩色/黑白、无空白页', async () => {
+  await test('应用内打印预览：A4、黑白切换、无空白页', async () => {
     await resetEditor(page)
     await page.locator('[data-el-id="p0-3"]').click()
     await sleep(200)
+    // 一次点击直达预览弹窗
     await page.locator('.ed-print-trigger').click()
-    await page.locator('.ed-print-pop button', { hasText: '黑白预览' }).click()
-    await page.locator('.ed-print-go').click()
     await page.waitForFunction(() => {
       const f = document.querySelector('#ed-print-preview iframe')
       return !!f?.contentDocument?.querySelector('.ed-page-wrap')
     })
+    // 黑白在弹窗标题栏切换
+    await page.evaluate(() => document.querySelector('#ed-print-preview iframe').contentDocument.getElementById('pv-mode-bw').click())
+    await sleep(150)
     const preview = await page.evaluate(() => {
       const f = document.querySelector('#ed-print-preview iframe')
       const d = f.contentDocument
@@ -1085,8 +1296,9 @@ try {
       return {
         count: pages.length,
         bar: !!d.querySelector('.print-preview-bar'),
-        w: pages[0]?.getBoundingClientRect().width,
-        h: pages[0]?.getBoundingClientRect().height,
+        // 弹窗会按整页可见缩放（zoom），所以看布局尺寸而不是 getBoundingClientRect
+        w: pages[0]?.offsetWidth,
+        h: pages[0]?.offsetHeight,
         filter: getComputedStyle(pages[0]).filter,
         text: d.body.innerText.slice(0, 80),
         sel: window.__paibanApi.selection,
@@ -1105,6 +1317,129 @@ try {
     })
     await sleep(200)
     assert(await page.evaluate(() => !document.getElementById('ed-print-preview')), '打印预览没有关闭')
+  })
+
+  /* ---------------- 自动存档 ---------------- */
+
+  const resetAutosave = async () => {
+    await page.evaluate(() => {
+      localStorage.removeItem('paiban-editor-doc-v1')
+      localStorage.removeItem('paiban-doc-snapshots-v1')
+      localStorage.removeItem('paiban-save-meta-v1')
+    })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(() => !!window.__paibanApi)
+    await waitSettled(page)
+  }
+
+  await test('自动存档：改完 0.4 秒落盘，状态显示保存时间', async () => {
+    await resetAutosave()
+    const target = await page.evaluate(() => {
+      const el = window.__paibanApi.doc.pages[0].els.find((e) => e.kind === 'text' && !e.locked)
+      return { id: el.id, y: el.y }
+    })
+    await page.evaluate((id) => window.__paibanApi.nudge(id, 0, 8), target.id)
+    const saved = await page.evaluate(async (id) => {
+      await new Promise((r) => setTimeout(r, 900))
+      const raw = localStorage.getItem('paiban-editor-doc-v1')
+      const parsed = raw ? JSON.parse(raw) : null
+      const stored = parsed?.pages.flatMap((p) => p.els).find((e) => e.id === id)
+      const live = window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === id)
+      // 保存状态不挂在 api 上（避免整树重渲染），看落盘的元信息 + 工具栏角标
+      const meta = JSON.parse(localStorage.getItem('paiban-save-meta-v1') || 'null')
+      return {
+        storedY: stored?.y,
+        liveY: live?.y,
+        at: meta?.at,
+        dot: document.querySelector('.ed-save-dot')?.className ?? '',
+      }
+    }, target.id)
+    assert(typeof saved.at === 'number' && Date.now() - saved.at < 60_000, `没有记录保存时间：${saved.at}`)
+    assert(!saved.dot.includes('is-err'), `工具栏显示保存失败：${saved.dot}`)
+    assert(Math.abs(saved.storedY - saved.liveY) < 0.5, `存档与内存不一致：${saved.storedY} vs ${saved.liveY}`)
+    assert(Math.abs(saved.liveY - (target.y + 8)) < 0.5, `微调没有生效：${target.y} → ${saved.liveY}`)
+  })
+
+  await test('10 秒快照：打了点、内容没变就不重复写', async () => {
+    const before = await page.evaluate(
+      () => JSON.parse(localStorage.getItem('paiban-doc-snapshots-v1') || '{"list":[]}').list.length,
+    )
+    const after = await page.evaluate(() => {
+      const api = window.__paibanApi
+      api.saveNow()
+      api.saveNow()
+      api.saveNow()
+      // 同一个 tick 里 React state 还没更新，直接读落盘结果更可靠
+      return JSON.parse(localStorage.getItem('paiban-doc-snapshots-v1') || '{"list":[]}').list
+    })
+    assert(after.length === before + 1, `内容没变却重复写快照：${before} → ${after.length}`)
+    assert(after[0].pages >= 2 && after[0].els > 20, `快照元信息异常：${JSON.stringify(after[0])}`)
+  })
+
+  await test('快照恢复：删掉的组件能退回，恢复本身可撤销', async () => {
+    const { victim, snapAt } = await page.evaluate(() => {
+      const api = window.__paibanApi
+      const el = api.doc.pages[0].els.find((e) => e.kind === 'text' && !e.locked)
+      api.saveNow() // 先给「有它」的状态打个点
+      const list = JSON.parse(localStorage.getItem('paiban-doc-snapshots-v1') || '{"list":[]}').list
+      api.removeEl(el.id)
+      return { victim: el.id, snapAt: list[0].at }
+    })
+    await waitSettled(page)
+    const gone = await page.evaluate((id) => !window.__paibanApi.doc.pages.some((p) => p.els.some((e) => e.id === id)), victim)
+    assert(gone, '组件没有被删掉，用例前提不成立')
+
+    const restored = await page.evaluate(
+      ([id, at]) => {
+        const api = window.__paibanApi
+        const ok = api.restoreSnapshot(at)
+        const back = api.doc.pages.some((p) => p.els.some((e) => e.id === id))
+        return { ok, back }
+      },
+      [victim, snapAt],
+    )
+    assert(restored.ok, '恢复快照返回失败')
+    assert(restored.back, '恢复后组件没有回来')
+    await waitSettled(page)
+    assertInvariants(await readState(page), '恢复快照后')
+
+    // 恢复走的是 commit，应该能 Ctrl+Z 回到「删掉」的状态
+    await page.evaluate(() => window.__paibanApi.undo())
+    await waitSettled(page)
+    const undone = await page.evaluate((id) => !window.__paibanApi.doc.pages.some((p) => p.els.some((e) => e.id === id)), victim)
+    assert(undone, '撤销恢复后没有回到删除状态')
+    await page.evaluate(() => window.__paibanApi.redo())
+    await waitSettled(page)
+    await screenshot(page, '06-autosave.png')
+  })
+
+  await test('存档浮层：列出快照、能点开', async () => {
+    await page.evaluate(() => window.__paibanApi.saveNow())
+    await page.click('.ed-tb-save')
+    await page.waitForSelector('.ed-save-pop', { timeout: 3000 })
+    const items = await page.locator('.ed-save-pop .ed-save-item').count()
+    assert(items >= 1, `浮层里没有快照条目：${items}`)
+    const first = await page.locator('.ed-save-pop .ed-save-item').first().innerText()
+    assert(/\d{2}:\d{2}:\d{2}/.test(first), `快照条目缺少时间：${first}`)
+    await page.keyboard.press('Escape')
+    await page.evaluate(() => document.querySelector('.ed-tb-save')?.click())
+  })
+
+  await test('存档损坏：先原样备份，再用初始模板起', async () => {
+    await page.evaluate(() => {
+      localStorage.setItem('paiban-editor-doc-v1', '{"pages":[{"els":[oops')
+      localStorage.removeItem('paiban-editor-doc-v1.corrupt')
+    })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(() => !!window.__paibanApi)
+    await waitSettled(page)
+    const result = await page.evaluate(() => ({
+      pages: window.__paibanApi.doc.pages.length,
+      backup: localStorage.getItem('paiban-editor-doc-v1.corrupt'),
+    }))
+    assert(result.pages >= 2, `损坏存档没有回退到初始模板：${result.pages} 页`)
+    assert(result.backup && result.backup.includes('oops'), '损坏存档没有被备份，后续自动保存会把它盖掉')
+    await resetAutosave()
   })
 
   const fatal = logs.filter((l) => l.type === 'pageerror')

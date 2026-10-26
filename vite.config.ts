@@ -3,6 +3,7 @@ import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { docImportPlugin } from './tools/import/server-plugin.mjs'
 
 const MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -70,7 +71,7 @@ function localImages(): Plugin {
 export default defineConfig({
   // 相对资源路径：dist 既能放到任意子目录，也便于构建后内联成单文件
   base: './',
-  plugins: [react(), localImages()],
+  plugins: [react(), localImages(), docImportPlugin()],
   server: {
     host: '127.0.0.1',
     port: 5173,
