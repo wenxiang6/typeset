@@ -11,3 +11,6 @@ build/icon.png
 
 # Word 导入抽出的图片（每次导入按时间戳生成，7 天后自动清理）
 public/images/imported/
+
+# 服务器部署时导入图片的落盘目录（pnpm serve 默认位置）
+var/

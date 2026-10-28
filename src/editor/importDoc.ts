@@ -44,6 +44,8 @@ export interface ImportPayload {
   warnings: string[]
   images?: Array<{ url: string; width: number; height: number }>
   elapsed?: number
+  /** 服务端排版时携带的合并策略（默认 auto） */
+  mergeMode?: 'auto' | 'merge' | 'split'
 }
 
 /** 图片最高高度，与报纸版 .img-ph img 的上限一致（横版基准，竖版按可用高度放宽） */

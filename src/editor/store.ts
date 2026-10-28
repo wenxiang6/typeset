@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Doc, El, ElStyle, FlowConfig, GridConfig, Orientation, SubStyle } from './types'
 import { INITIAL_DOC } from './initialDoc'
+import { mergeHtml, splitHtmlParts, type SplitMode, type SplitOptions } from './split'
 import {
   A4,
   DOC_VERSION,
@@ -32,13 +33,16 @@ import {
 
 import {
   DOC_KEY,
+  PUSH_SEEN_KEY,
   SNAP_INTERVAL,
   backupCorrupt,
   listSnapshots,
+  markDirty,
   pushSnapshot,
   snapshotAt,
   writeDoc as writeDocStorage,
 } from './autosave'
+import { fetchServerDocMeta } from './serverSync'
 
 const STORAGE_KEY = DOC_KEY
 const HISTORY_LIMIT = 60
@@ -97,6 +101,32 @@ function syncPageChrome(doc: Doc, source: El, fields: readonly string[]) {
   renumberPages(doc)
 }
 
+/** 按 id 找组件（不依赖 React state，供写入前的“是否真的变了”判断用） */
+function findElIn(doc: Doc, id: string): El | null {
+  for (const page of doc.pages) {
+    const hit = page.els.find((e) => e.id === id)
+    if (hit) return hit
+  }
+  return null
+}
+
+/** patch 里是否有字段真的改变了（全都没变就不该进撤销栈） */
+function styleDiffers(el: El, patch: Partial<ElStyle>) {
+  const cur = (el.style ?? {}) as Record<string, unknown>
+  return Object.entries(patch).some(([k, v]) => (cur[k] ?? undefined) !== (v ?? undefined))
+}
+
+/** 组件字段是否真有变化：数字留 0.001 容差（拖动落点常常是 10.000001 这种） */
+function elDiffers(el: El, patch: Partial<El>) {
+  const cur = el as unknown as Record<string, unknown>
+  return Object.entries(patch).some(([k, v]) => {
+    const a = cur[k]
+    if (typeof v === 'number' && typeof a === 'number') return Math.abs(a - v) > 0.001
+    if (v && typeof v === 'object') return JSON.stringify(a ?? null) !== JSON.stringify(v)
+    return (a ?? undefined) !== (v ?? undefined)
+  })
+}
+
 export function useEditor() {
   const [doc, setDocState] = useState<Doc>(loadDoc)
   const docRef = useRef(doc)
@@ -104,7 +134,15 @@ export function useEditor() {
 
   const [past, setPast] = useState<Doc[]>([])
   const [future, setFuture] = useState<Doc[]>([])
-  const [selection, setSelection] = useState<string | null>(null)
+  const [selectionState, setSelectionState] = useState<string | null>(null)
+  /** 多选时除主选中以外的组件（Shift / Cmd 点选、框选累加） */
+  const [extraSel, setExtraSel] = useState<string[]>([])
+  const selection = selectionState
+  /** 单选：清空多选。绝大多数旧调用点走这里，行为保持不变。 */
+  const setSelection = useCallback((id: string | null) => {
+    setSelectionState(id)
+    setExtraSel([])
+  }, [])
   const [subSelection, setSubSelectionState] = useState<{ elId: string; index: number } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [grid, setGrid] = useState<GridConfig>({ show: true, snap: true, cell: 8 })
@@ -117,7 +155,82 @@ export function useEditor() {
   /** 最近一次已经写进 localStorage 的内容，用来判断「还有没有没落盘的改动」 */
   const lastWrittenRef = useRef('')
 
-  // 切换到别的组件/页面时，自动退出内部元素选择
+  // 选中集合：主选中在最前，其后是追加项；已不存在的 id 自动剔除
+  const selRef = useRef<{ primary: string | null; extra: string[] }>({ primary: null, extra: [] })
+  selRef.current = { primary: selectionState, extra: extraSel }
+  const selectedIds = useMemo(() => {
+    const alive = new Set<string>()
+    for (const p of doc.pages) for (const e of p.els) alive.add(e.id)
+    const out: string[] = []
+    if (selectionState && alive.has(selectionState)) out.push(selectionState)
+    for (const id of extraSel) if (id !== selectionState && !out.includes(id) && alive.has(id)) out.push(id)
+    return out
+  }, [doc, selectionState, extraSel])
+
+  /** 只换主选中、保留多选（拖动/双击时用，别把已选的一组清掉） */
+  const setPrimary = useCallback((id: string | null) => {
+    setSelectionState(id)
+    setExtraSel((prev) => (id && prev.includes(id) ? prev.filter((x) => x !== id) : prev))
+  }, [])
+
+  /** Shift / Cmd 点选：追加、取消；再点一次主选中则取消它（追加项顶上） */
+  const toggleSelect = useCallback((id: string) => {
+    const { primary, extra } = selRef.current
+    if (primary === id) {
+      if (!extra.length) return
+      setSelectionState(extra[extra.length - 1])
+      setExtraSel(extra.slice(0, -1))
+      return
+    }
+    if (extra.includes(id)) {
+      setExtraSel(extra.filter((x) => x !== id))
+      return
+    }
+    if (!primary) {
+      setSelectionState(id)
+      return
+    }
+    setSelectionState(id)
+    setExtraSel([...extra, primary])
+  }, [])
+
+  /** Shift 连选：按阅读顺序（页 → 上到下 → 左到右）把中间的都选上 */
+  const selectRangeTo = useCallback((id: string) => {
+    const order: string[] = []
+    for (const page of docRef.current.pages) {
+      for (const e of [...page.els].sort((a, b) => a.y - b.y || a.x - b.x)) order.push(e.id)
+    }
+    const to = order.indexOf(id)
+    if (to < 0) return
+    const from = selectionState ? order.indexOf(selectionState) : -1
+    if (from < 0) {
+      setSelectionState(id)
+      setExtraSel([])
+      return
+    }
+    const [a, b] = from <= to ? [from, to] : [to, from]
+    const ids = order.slice(a, b + 1)
+    setSelectionState(id)
+    setExtraSel(ids.filter((x) => x !== id))
+  }, [selectionState])
+
+  /** 框选结果：一次给一组 id（最后一个当主选中） */
+  const setSelectionGroup = useCallback((ids: string[]) => {
+    if (!ids.length) {
+      setSelectionState(null)
+      setExtraSel([])
+      return
+    }
+    setSelectionState(ids[ids.length - 1])
+    setExtraSel(ids.slice(0, -1))
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectionState(null)
+    setExtraSel([])
+  }, [])
+
+
   useEffect(() => {
     setSubSelectionState(null)
   }, [selection, pageIdx])
@@ -138,6 +251,7 @@ export function useEditor() {
   // 否则每保存一次就整棵树重渲染，会打断正在进行的拖动（表格行列线等）。
   useEffect(() => {
     rawRef.current = JSON.stringify(doc)
+    markDirty()
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
       writeDocStorage(rawRef.current)
@@ -153,6 +267,72 @@ export function useEditor() {
       pushSnapshot(rawRef.current, docRef.current)
     }, SNAP_INTERVAL)
     return () => window.clearInterval(id)
+  }, [])
+
+  // 服务器稿的载入时机，两种：
+  // 1. 外部推送（排版 skill / 脚本带 ?push=1 写进来的新稿）→ 不管本机有没有存档都载入，
+  //    先把当前本地稿打一份快照兜底，「历史版本」里能退回去；
+  // 2. 跨设备恢复（本机没存档而服务器有）→ 换浏览器 / 换电脑时拉回来。
+  // 编辑器自己的自动保存只更新服务器时间戳 at，不动 pushedAt，所以不会自己冲掉自己。
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        let localRaw: string | null = null
+        try {
+          localRaw = localStorage.getItem(STORAGE_KEY)
+        } catch {
+          localRaw = null
+        }
+
+        const meta = await fetchServerDocMeta()
+        if (!meta || cancelled) return
+
+        let seen = 0
+        try {
+          seen = Number(localStorage.getItem(PUSH_SEEN_KEY) || 0)
+        } catch {
+          seen = 0
+        }
+        const externalPush = meta.pushedAt > seen
+        if (localRaw !== null && !externalPush) return
+
+        const parsed = JSON.parse(meta.raw) as Doc
+        if (!parsed || !Array.isArray(parsed.pages) || !parsed.pages.length) return
+
+        if (externalPush) {
+          // 把用户手上这一版先存成快照，推送不是「不可撤销」的
+          if (localRaw) {
+            try {
+              pushSnapshot(localRaw, JSON.parse(localRaw))
+            } catch {
+              /* 快照失败不影响载入 */
+            }
+          }
+          try {
+            localStorage.setItem(PUSH_SEEN_KEY, String(meta.pushedAt))
+          } catch {
+            /* 忽略 */
+          }
+        }
+
+        const normalized = normalizeDoc(parsed)
+        const restored = isBrokenLayout(normalized)
+          ? repairLayout(normalized)
+          : !parsed.version || parsed.version < DOC_VERSION
+            ? reflowDoc(normalized)
+            : normalized
+        if (cancelled) return
+        writeDocStorage(meta.raw)
+        lastWrittenRef.current = meta.raw
+        setDoc(restored)
+      } catch {
+        /* 服务器不可用 / 数据损坏：保持初始文档 */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // 关窗口 / 切到后台：立刻补写还没落盘的改动。
@@ -276,6 +456,10 @@ export function useEditor() {
         if (source) syncPageChrome(d, source, Object.keys(patch))
         return d
       }
+      // 值没变就别写：单击选中、拖动放下、失焦回写 html 都会带着「和原来一样」的
+      // 数据走到这里，无脑提交会让撤销栈里全是空步骤。
+      const cur = findElIn(docRef.current, id)
+      if (!cur || !elDiffers(cur, patch)) return
       if (withHistory) {
         commit(apply)
       } else {
@@ -288,6 +472,10 @@ export function useEditor() {
 
   const updateStyle = useCallback(
     (id: string, patch: Partial<ElStyle>) => {
+      // 值没变就别提交：下拉框一次选择可能连发 input+change 两个事件，
+      // 重复入栈会让「撤销一步」只退到同一个值的中间态。
+      const target = findElIn(docRef.current, id)
+      if (!target || !styleDiffers(target, patch)) return
       commit((d) => {
         let source: El | null = null
         d.pages.forEach((p) => {
@@ -298,6 +486,41 @@ export function useEditor() {
           })
         })
         if (source) syncPageChrome(d, source, ['style'])
+        return d
+      })
+    },
+    [commit],
+  )
+
+  /**
+   * 批量改外观：多选时一次写到所有选中块，整批只算一步撤销。
+   *
+   * 只处理 style（字体/字号/颜色/行距/边框…），不动 x/y/w/h。
+   * 位置尺寸批量设成同一个值几乎必然破坏版面（每块大小本来就不同），
+   * 需要对齐请用画布上的对齐工具。
+   */
+  const updateStyleMany = useCallback(
+    (ids: string[], patch: Partial<ElStyle>) => {
+      if (!ids.length) return
+      // 所有目标块都已经是这个值 → 不提交（同 updateStyle，避免重复入栈）
+      const anyDiffers = ids.some((id) => {
+        const el = findElIn(docRef.current, id)
+        return el ? styleDiffers(el, patch) : false
+      })
+      if (!anyDiffers) return
+      const wanted = new Set(ids)
+      commit((d) => {
+        const touched: El[] = []
+        for (const page of d.pages) {
+          page.els = page.els.map((el) => {
+            if (!wanted.has(el.id)) return el
+            const next = { ...el, style: { ...el.style, ...patch } }
+            touched.push(next)
+            return next
+          })
+        }
+        // 页眉页脚是「一改全改」的：只要其中一块被改到，就同步到所有页
+        for (const el of touched) syncPageChrome(d, el, ['style'])
         return d
       })
     },
@@ -487,10 +710,36 @@ export function useEditor() {
         })
         return d
       })
-      setSelection((s) => (s === id ? null : s))
+      if (selRef.current.primary === id) setSelection(null)
+      setExtraSel((prev) => prev.filter((x) => x !== id))
     },
     [commit],
   )
+
+  /* —— 组件级剪贴板：Ctrl+C / Ctrl+X / Ctrl+V，可跨页粘贴 —— */
+  const clipRef = useRef<El | null>(null)
+
+  const copySel = useCallback(() => {
+    if (!selection) return false
+    const el = findEl(selection)
+    if (!el || el.kind === 'chrome' || el.background) return false
+    clipRef.current = clone(el)
+    return true
+  }, [selection, findEl])
+
+  const cutSel = useCallback(() => {
+    if (!copySel()) return false
+    removeEl(selection!)
+    return true
+  }, [copySel, removeEl, selection])
+
+  const pasteSel = useCallback(() => {
+    const el = clipRef.current
+    if (!el || el.kind === 'chrome') return false
+    // 粘贴在原位右下 16px 处，新组件拿到新 id 并自动选中
+    addEl(pageIdx, { ...clone(el), x: el.x + 16, y: el.y + 16, locked: false })
+    return true
+  }, [addEl, pageIdx])
 
   const duplicateEl = useCallback(
     (id: string) => {
@@ -608,6 +857,23 @@ export function useEditor() {
   /** 快照列表（读盘即可，不进 React state，避免无谓重渲染） */
   const getSnapshots = useCallback(() => listSnapshots(), [])
 
+  /** 载入「另一个窗口刚写进 localStorage」的版本（走 commit，可 Ctrl+Z 反悔） */
+  const loadExternalDoc = useCallback((): boolean => {
+    try {
+      const raw = localStorage.getItem(DOC_KEY)
+      if (!raw) return false
+      const parsed = JSON.parse(raw) as Doc
+      if (!parsed || !Array.isArray(parsed.pages) || !parsed.pages.length) return false
+      const normalized = normalizeDoc(parsed)
+      commit(() => (isBrokenLayout(normalized) ? repairLayout(normalized) : reflowDoc(normalized)))
+      setSelection(null)
+      setEditingId(null)
+      return true
+    } catch {
+      return false
+    }
+  }, [commit])
+
   /* —— 横竖版 / 自动排版 —— */
 
   const setOrientation = useCallback(
@@ -661,9 +927,16 @@ export function useEditor() {
         if (any) break
       }
       if (!any) return
-      commit((d) => applyHeights(d, heights, { growLocked: true }))
+      /*
+       * 测量写回是「派生数据」，不进撤销栈。
+       *
+       * 之前这里走 commit，导致改一次字号会压两条历史：一条是改字号，一条是随后的
+       * 自动重排。用户按 Ctrl+Z 只退掉了重排，字号没变，看着像撤销失灵。
+       * 现在直接写 doc；撤销恢复旧 doc 后，Canvas 会重新测量，高度自然修正。
+       */
+      setDoc(applyHeights(clone(docRef.current), heights, { growLocked: true }))
     },
-    [commit],
+    [setDoc],
   )
 
   /** 把当前图片变成当前页的全屏背景 */
@@ -866,12 +1139,199 @@ export function useEditor() {
   const isTxActive = useCallback(() => txActive.current, [])
   const getDoc = useCallback(() => docRef.current, [])
 
+  /* ------------------------------------------------------------------ *
+   * 大块拆小块 / 小块合并
+   * ------------------------------------------------------------------ */
+
+  /**
+   * 拆一块 / 多块：按段落边界（或指定块数、字数、光标位置）拆成多个同类型组件。
+   * 只切在根元素的子节点之间，所以不会把一个句子切成两半；拆不动就原样返回 0。
+   * @returns 拆出来的总块数（失败为 0）
+   */
+  const splitElements = useCallback(
+    (ids: string[], mode: SplitMode, opts: SplitOptions = {}) => {
+      const uniq = Array.from(new Set(ids.filter(Boolean)))
+      if (!uniq.length) return 0
+      // 先探一遍：谁都拆不动就直接返回，不写历史、不触发回流
+      const plan = new Map<string, string[]>()
+      for (const page of docRef.current.pages) {
+        for (const el of page.els) {
+          if (!uniq.includes(el.id)) continue
+          const parts = splitHtmlParts(el.html ?? '', mode, {
+            ...opts,
+            // 「从光标处切开」用当前子元素选区的位置
+            at: opts.at ?? (subSelection?.elId === el.id ? subSelection.index : undefined),
+          })
+          if (parts.length >= 2) plan.set(el.id, parts)
+        }
+      }
+      if (!plan.size) return 0
+      let made = 0
+      let firstId = ''
+      commit((d) => {
+        for (const page of d.pages) {
+          const out: El[] = []
+          const maxZ = Math.max(0, ...page.els.map((e) => e.z))
+          for (const el of page.els) {
+            const parts = plan.get(el.id)
+            if (!parts) {
+              out.push(el)
+              continue
+            }
+            made += parts.length
+            parts.forEach((html, k) => {
+              const next: El = {
+                ...clone(el),
+                id: uid('el'),
+                html,
+                sub: undefined,
+                // y 只用来定顺序，真正的纵向位置由下面的回流压实
+                y: el.y + k * 0.5,
+                h: Math.max(12, Math.round((el.h / parts.length) * 10) / 10),
+                autoHeight: true,
+                z: maxZ + 0.1 * (k + 1),
+                continued: k === 0 ? el.continued : true,
+              }
+              if (!firstId) firstId = next.id
+              out.push(next)
+            })
+          }
+          page.els = out
+        }
+        return made ? reflowDoc(d) : d
+      })
+      if (firstId) setSelection(firstId)
+      return made
+    },
+    [commit, subSelection],
+  )
+
+  const splitElement = useCallback(
+    (id: string, mode: SplitMode, opts: SplitOptions = {}) => splitElements([id], mode, opts),
+    [splitElements],
+  )
+
+  /**
+   * 合并多块（多选后右键/面板）：按阅读顺序把后面的内容依次并进第一块。
+   * 只合并同类型、根标签一致的块，其余的跳过并回报数量。
+   * @returns { ok: 并掉的块数, skipped: 类型不符没并的块数 }
+   */
+  const mergeElements = useCallback(
+    (ids: string[]) => {
+      const uniq = Array.from(new Set(ids.filter(Boolean)))
+      if (uniq.length < 2) return { ok: 0, skipped: 0 }
+      let merged = 0
+      let skipped = 0
+      let baseId = ''
+      commit((d) => {
+        const hits: { pi: number; el: El }[] = []
+        d.pages.forEach((p, pi) =>
+          p.els.forEach((e) => {
+            if (uniq.includes(e.id)) hits.push({ pi, el: e })
+          }),
+        )
+        if (hits.length < 2) return d
+        hits.sort((a, b) => a.pi - b.pi || a.el.y - b.el.y || a.el.x - b.el.x)
+        const base = hits[0]
+        let html = base.el.html ?? ''
+        let h = base.el.h
+        const drop: string[] = []
+        for (const hit of hits.slice(1)) {
+          const e = hit.el
+          if (e.locked || e.background || e.kind !== base.el.kind || e.variant !== base.el.variant) {
+            skipped++
+            continue
+          }
+          const m = mergeHtml(html, e.html ?? '')
+          if (!m) {
+            skipped++
+            continue
+          }
+          html = m
+          h = Math.max(h, e.h)
+          drop.push(e.id)
+          merged++
+        }
+        if (!drop.length) return d
+        base.el.html = html
+        base.el.h = h
+        base.el.autoHeight = true
+        for (const p of d.pages) p.els = p.els.filter((e) => !drop.includes(e.id))
+        baseId = base.el.id
+        return reflowDoc(d)
+      })
+      if (baseId) setSelection(baseId)
+      return { ok: merged, skipped }
+    },
+    [commit, setSelection],
+  )
+
+  /** 删除当前所有选中（页眉/页脚等锁定件跳过） */
+  const removeSelected = useCallback(() => {
+    const ids = selectedIds
+    if (!ids.length) return 0
+    if (ids.length === 1) {
+      removeEl(ids[0])
+      return 1
+    }
+    let n = 0
+    commit((d) => {
+      for (const p of d.pages) {
+        p.els = p.els.filter((e) => {
+          if (ids.includes(e.id) && !e.locked) {
+            n++
+            return false
+          }
+          return true
+        })
+      }
+      return n ? reflowDoc(d) : d
+    })
+    clearSelection()
+    return n
+  }, [clearSelection, commit, removeEl, selectedIds])
+
+  /**
+   * 与同栏的下一块合并（要求同类型、html 根标签一致）。
+   * @returns 是否合并成功
+   */
+  const mergeWithNext = useCallback(
+    (id: string) => {
+      let ok = false
+      commit((d) => {
+        for (let pi = 0; pi < d.pages.length; pi++) {
+          const page = d.pages[pi]
+          const src = page.els.find((e) => e.id === id)
+          if (!src || !isFlowable(src)) continue
+          const g = getGeometry(d, pi)
+          const col = columnOf(g, src)
+          const next = page.els
+            .filter((e) => e.id !== id && isFlowable(e) && columnOf(g, e) === col && e.y > src.y + 0.5)
+            .sort((a, b) => a.y - b.y)[0]
+          if (!next || next.variant !== src.variant) return d
+          const merged = mergeHtml(src.html ?? '', next.html ?? '')
+          if (!merged) return d
+          src.html = merged
+          src.h = Math.max(src.h, next.h)
+          src.autoHeight = true
+          page.els = page.els.filter((e) => e.id !== next.id)
+          ok = true
+          break
+        }
+        return ok ? reflowDoc(d) : d
+      })
+      return ok
+    },
+    [commit],
+  )
+
   return useMemo(
     () => ({
       doc,
       past,
       future,
       selection,
+      selectedIds,
       subSelection,
       editingId,
       grid,
@@ -882,6 +1342,11 @@ export function useEditor() {
       setZoom,
       setGrid,
       setSelection,
+      setPrimary,
+      toggleSelect,
+      selectRangeTo,
+      setSelectionGroup,
+      clearSelection,
       setEditingId,
       drawMode,
       setDrawMode,
@@ -891,10 +1356,15 @@ export function useEditor() {
       saveNow,
       restoreSnapshot,
       getSnapshots,
+      copySel,
+      cutSel,
+      pasteSel,
+      loadExternalDoc,
       findEl,
       getDoc,
       updateEl,
       updateStyle,
+      updateStyleMany,
       nudge,
       swapNeighbor,
       setSubSelection,
@@ -923,6 +1393,11 @@ export function useEditor() {
       setPageBackground,
       makeBackground,
       splitTextElement,
+      splitElement,
+      splitElements,
+      mergeElements,
+      mergeWithNext,
+      removeSelected,
       moveElToPageAt,
       clearNoFlow,
       moveElToPage,
@@ -931,9 +1406,10 @@ export function useEditor() {
       removePage,
     }),
     [
-      doc, past, future, selection, subSelection, editingId, grid, zoom, pageIdx, drawMode, setPageIdx, commit, undo, redo, findEl,
-      getDoc, updateEl, updateStyle, nudge, swapNeighbor, setSubSelection, updateSubStyle, nudgeSub, clearSubStyle, applyDefaultsToBody, beginTx, endTx, cancelTx, isTxActive, addEl, removeEl,
-      duplicateEl, setZ, toggleLock, updatePage, resetDoc, importDoc, snapVal, setOrientation, setFlow, reflow, repair, applyMeasuredHeights, setPageBackground, makeBackground, splitTextElement, moveElToPageAt, clearNoFlow, moveElToPage, moveElToNextPage, addPage, removePage,
+      doc, past, future, selection, selectedIds, subSelection, editingId, grid, zoom, pageIdx, drawMode, setPageIdx, commit, undo, redo, findEl,
+      getDoc, updateEl, updateStyle, updateStyleMany, nudge, swapNeighbor, setSubSelection, updateSubStyle, nudgeSub, clearSubStyle, applyDefaultsToBody, beginTx, endTx, cancelTx, isTxActive, addEl, removeEl,
+      duplicateEl, setZ, toggleLock, updatePage, resetDoc, importDoc, snapVal, setOrientation, setFlow, reflow, repair, applyMeasuredHeights, setPageBackground, makeBackground, splitTextElement, splitElement, splitElements, mergeElements, mergeWithNext, removeSelected, moveElToPageAt, clearNoFlow, moveElToPage, moveElToNextPage, addPage, removePage,
+      setSelection, setPrimary, toggleSelect, selectRangeTo, setSelectionGroup, clearSelection,
       saveNow, restoreSnapshot, getSnapshots,
     ],
   )

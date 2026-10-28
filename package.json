@@ -25,7 +25,9 @@
     "dist:win": "vite build && node scripts/make-icon.mjs && electron-builder --win",
     "dist:win:portable": "vite build && node scripts/pack-win.mjs",
     "dist:mac:arm": "vite build && node scripts/make-icon.mjs && electron-builder --mac --arm64",
-    "desktop:check": "node scripts/desktop-check.mjs"
+    "desktop:check": "node scripts/desktop-check.mjs",
+    "serve": "node scripts/serve.mjs",
+    "serve:check": "node scripts/serve.mjs --check"
   },
   "dependencies": {
     "react": "^19.3.0",

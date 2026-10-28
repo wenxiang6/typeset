@@ -57,6 +57,25 @@ node tools/paiban-mcp/server.mjs
 | `paiban_reset` | 清空本地存档、回到初始模板（CDP 模式下只重载页面，不动存档） |
 | `paiban_print_check` | 切打印媒体，检查工具栏/纸张/@page，再恢复 |
 | `paiban_run_smoke` | 执行 `pnpm smoke` 全套回归 |
+| `validate_layout` | 校验语义版面 JSON（类型白名单 / 必填 / 空块 / 汉字数）。**不起浏览器** |
+| `submit_layout` | 语义 JSON → 服务端排版并推送，前端刷新即见；`dryRun:true` 只出报告 |
+| `upload_image` | 本机图片 → `local:` 引用 + 宽高比，提交时自动转图片上传落盘 |
+
+## 语义版面（AI 直接排版）
+
+前八个工具是「操作浏览器里的编辑器」；后三个是「直接产出版面」，走纯 Node + HTTP，
+不需要 Vite、不需要 Playwright，秒级返回：
+
+```json
+{ "name": "validate_layout", "arguments": { "path": "var/issue1/blocks.json" } }
+{ "name": "submit_layout", "arguments": { "path": "var/issue1/blocks.json" } }
+{ "name": "submit_layout", "arguments": { "layout": { "meta": {...}, "blocks": [...] }, "dryRun": true } }
+{ "name": "upload_image", "arguments": { "path": "/Users/me/fig1.png" } }
+```
+
+语义 JSON 只描述内容（section/para/note/quiz/tpl…），**不带坐标**；坐标由
+`tools/layout/geometry.mjs` 按真实栏宽算出来。完整 schema 见
+`~/.workbuddy/skills/paiban-word-to-json/SKILL.md` 或 `tools/layout/schema.mjs`。
 
 ## 示例
 

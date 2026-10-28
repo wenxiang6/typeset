@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { EditorApi } from './store'
+import { confirmNotice } from './confirmNotice'
 import {
   defaultTemplate,
   downloadTemplate,
   embedTemplateImages,
   loadSavedTemplates,
   makeTemplate,
+  mergeTemplatesFromServer,
   parseTemplateText,
   persistSavedTemplates,
   templateSummary,
@@ -26,6 +28,10 @@ export function TemplateDialog({ api, open, onClose }: { api: EditorApi; open: b
     setSaved(loadSavedTemplates())
     setName('')
     setMessage('')
+    // 服务器上有别的浏览器/设备存的模板时，自动合并进来（跨设备恢复）
+    void mergeTemplatesFromServer().then((merged) => {
+      if (merged) setSaved(merged)
+    })
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -67,8 +73,14 @@ export function TemplateDialog({ api, open, onClose }: { api: EditorApi; open: b
     setMessage(missing ? `分享文件已下载；${missing} 张本地图片无法打包。` : '分享文件已下载，可直接发给其他人导入。')
   }
 
-  const remove = (t: Template) => {
-    if (!confirm(`删除模板「${t.name}」？`)) return
+  const remove = async (t: Template) => {
+    const ok = await confirmNotice({
+      tone: 'warn',
+      title: `删除模板「${t.name}」？`,
+      subtitle: '只删除本地保存的这份模板，当前版面不受影响。',
+      okLabel: '删除',
+    })
+    if (!ok) return
     const next = saved.filter((x) => x.id !== t.id)
     persistSavedTemplates(next)
     setSaved(next)
@@ -102,7 +114,7 @@ export function TemplateDialog({ api, open, onClose }: { api: EditorApi; open: b
         <div className="ed-template-head">
           <div>
             <div className="ed-template-title">模板库</div>
-            <div className="ed-template-sub">内置现有布局；保存的模板和导入文件都只存本机</div>
+            <div className="ed-template-sub">内置现有布局；保存的模板自动同步到服务器，换浏览器也能找回</div>
           </div>
           <button className="ed-template-close" onClick={onClose} aria-label="关闭模板库">
             ×

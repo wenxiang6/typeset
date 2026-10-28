@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('paibanDesktop', {
   onOpenJson: (cb) => {
     ipcRenderer.on('paiban:open-json', () => cb())
   },
+  /** 一键导出 PDF（主进程 printToPDF 落盘）；网页版没有这个桥，打印预览会隐藏按钮 */
+  exportPdf: (opts) => ipcRenderer.invoke('paiban:export-pdf', opts),
 })

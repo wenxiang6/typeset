@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { El } from './types'
+import { ContextMenu, type MenuItem } from './ui/ContextMenu'
+import { popNotice } from './confirmNotice'
+import { countParts } from './split'
 import type { EditorApi } from './store'
 import { findRegion, columnOf, getGeometry, isFlowable, isFurniture, isMeasurable, PAGE_GAP, resolveMove, type Rect } from './layout'
 import { resolveImageSrc } from './localImage'
+import { fileToCompactDataURL } from './imageTools'
 import { TableHandles } from './TableHandles'
 
 const HANDLES = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'] as const
@@ -16,6 +20,24 @@ const HANDLES = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'] as const
 const DWELL_MS = 800
 /** 指针抖动容差（屏幕像素），触控板手抖也不会重置计时 */
 const DWELL_TOL = 3
+
+/**
+ * 自动测量的收敛上限，超了就放弃自动调整（页面不崩，版面留给用户手动拖）。
+ * 正常稿子通常 1~2 轮就收敛，这里留了很宽的余量。
+ */
+const MAX_SPLIT_TRIES = 3
+const MAX_HEIGHT_TRIES = 6
+const MAX_MEASURE_ROUNDS = 40
+
+/**
+ * 只有「纯文字流」才适合按行切开。
+ *
+ * 带边框/底色的容器（quiz 测验框、note 提示框、tpl 模板框、trap 易错框、chain 因果链、
+ * name-row 姓名行）切开就是两个碎框，视觉上等于把一张卡片撕成两半。
+ * 更糟的是切开后新块和原块的高度还会互相比对，跟测量打架。
+ * 这类一律整块挪到下一栏/下一页，不切。
+ */
+const SPLITTABLE_VARIANTS = new Set(['paragraph', 'subhead', 'req'])
 
 export interface SplitPayload {
   topHtml: string
@@ -156,6 +178,8 @@ interface ElViewProps {
 
 function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
   const selected = api.selection === el.id
+  /** 多选里的「配角」：高亮但没有控制柄 */
+  const multi = !selected && api.selectedIds.includes(el.id)
   const editing = api.editingId === el.id
   const ref = useRef<HTMLDivElement>(null)
   // 拖动状态必须走 state：className 由 React 计算，命令式 classList 会被重渲染冲掉
@@ -198,7 +222,7 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
       if (el.locked) {
         e.stopPropagation()
         e.preventDefault()
-        api.setSelection(el.id)
+        api.setPrimary(el.id)
         api.setSubSelection(null)
         return
       }
@@ -208,16 +232,14 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
       const doc0 = api.getDoc()
       const live = doc0.pages[pageIdx]?.els.find((x) => x.id === el.id) ?? el
       const furniture = isFurniture(live)
-      api.setSelection(el.id)
+      // 拖动多选组里的某一块时保留整组选中，只把它提为主选中
+      if (api.selectedIds.length > 1 && api.selectedIds.includes(el.id)) api.setPrimary(el.id)
+      else api.setSelection(el.id)
       api.setSubSelection(null)
       api.beginTx()
 
-      // 拖动中的组件必须置顶，否则会被高层级的不透明块“吃掉”，看起来像消失
-      if (live.kind !== 'region') {
-        const maxZ = Math.max(0, ...(doc0.pages[pageIdx]?.els ?? []).map((x) => x.z))
-        if (live.z < maxZ) api.updateEl(el.id, { z: maxZ + 1 }, false)
-      }
-
+      // 置顶延后到真正拖动时（见 raiseToTop）：单击只是选中，不该改 z，
+      // 否则单击也会在撤销栈里压一条「置顶」，第一次 Ctrl+Z 看着毫无反应。
       const node = ref.current
       setDragging(true)
 
@@ -225,6 +247,14 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
       const startX = e.clientX
       const startY = e.clientY
       const orig = { x: live.x, y: live.y, w: live.w, h: live.h }
+      /** 首次真正拖动时把组件提到最上层；只做一次，避免每帧改 z */
+      let raised = false
+      const raiseToTop = () => {
+        if (raised || live.kind === 'region') return
+        raised = true
+        const maxZ = Math.max(0, ...(api.getDoc().pages[pageIdx]?.els ?? []).map((x) => x.z))
+        if (live.z < maxZ) api.updateEl(el.id, { z: maxZ + 1 }, false)
+      }
       // 拖动起点所在区域决定约束：元素在区域内时不会被拖出区域
       const regionEl = live.kind === 'region' ? null : findRegion(doc0, pageIdx, orig, el.id)
       const region = regionEl ? { x: regionEl.x, y: regionEl.y, w: regionEl.w, h: regionEl.h } : null
@@ -339,6 +369,8 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
 
       const move = (ev: PointerEvent) => {
         onPointerMoved(ev)
+        // 真的拖起来了才置顶：拖动中的组件必须压在其他块上面，否则会被不透明块吃掉
+        if (!raised && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 3) raiseToTop()
         const doc = api.getDoc()
         const dx = (ev.clientX - startX) / api.zoom
         const dy = (ev.clientY - startY) / api.zoom
@@ -502,13 +534,21 @@ function ElView({ el, api, pageIdx, onHoverPage, onGhost }: ElViewProps) {
     <div
       ref={ref}
       data-el-id={el.id}
-      className={`ed-el ed-kind-${el.kind} ed-v-${el.variant}${s.background ? ' has-custom-bg' : ''}${selected ? ' is-selected' : ''}${el.locked ? ' is-locked' : ''}${editing ? ' is-editing' : ''}${dragging ? ' is-dragging' : ''}${pushHint ? ' is-awaiting-push' : ''}${ghosted ? ' is-ghosted' : ''}`}
+      className={`ed-el ed-kind-${el.kind} ed-v-${el.variant}${s.background ? ' has-custom-bg' : ''}${selected ? ' is-selected' : ''}${multi ? ' is-multi-selected' : ''}${el.locked ? ' is-locked' : ''}${editing ? ' is-editing' : ''}${dragging ? ' is-dragging' : ''}${pushHint ? ' is-awaiting-push' : ''}${ghosted ? ' is-ghosted' : ''}`}
       style={style}
       onPointerDown={(e) => {
         if (editing || api.drawMode) return
         // 点选组件时把焦点从输入框/下拉框移开，方向键才能微调组件
         const ae = document.activeElement as HTMLElement | null
         if (ae && ae !== document.body && !e.currentTarget.contains(ae)) ae.blur()
+        /* 多选：Shift = 按阅读顺序连选；Cmd / Ctrl = 单个加选、再点取消 */
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          e.stopPropagation()
+          e.preventDefault()
+          if (e.shiftKey) api.selectRangeTo(el.id)
+          else api.toggleSelect(el.id)
+          return
+        }
         // 已选中复合组件时，再点内部元素 = 选中内部元素；点背景才拖动整个组件
         if (selected) {
           const part = (e.target as HTMLElement).closest('[data-sub-index]') as HTMLElement | null
@@ -589,10 +629,46 @@ function PageView({ api, pageIdx, dropTarget, isLast, onHoverPage, onGhost }: { 
   const page = doc.pages[pageIdx]
   const pageRef = useRef<HTMLDivElement>(null)
   const [band, setBand] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  /** 蓝色框的两种用途：画区域（drawMode）还是框选组件 */
+  const [bandMode, setBandMode] = useState<'region' | 'marquee'>('region')
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     api.setPageIdx(pageIdx)
+
+    // 拖入的是图片文件：直接落到松手位置（自动压缩后内嵌）
+    const imageFiles = Array.from(e.dataTransfer.files ?? []).filter((f) => f.type.startsWith('image/'))
+    if (imageFiles.length) {
+      const rect = pageRef.current!.getBoundingClientRect()
+      const geom = getGeometry(doc, pageIdx)
+      let dropX = api.snapVal((e.clientX - rect.left) / zoom)
+      let dropY = api.snapVal((e.clientY - rect.top) / zoom)
+      imageFiles.forEach((f, i) => {
+        const w = 300
+        const h = 200
+        // 超出页底的图片流到下一页顶部
+        let targetPage = pageIdx
+        if (dropY + h > geom.bottom + 2) {
+          targetPage = pageIdx + 1
+          dropX = geom.left
+          dropY = 0
+        }
+        const x = dropX + i * 24
+        const y = dropY + i * 24
+        fileToCompactDataURL(f).then((src) => {
+          const img = new Image()
+          img.onload = () => {
+            // 按真实比例修一次高度（宽度固定 300）
+            const ratio = img.naturalHeight && img.naturalWidth ? img.naturalHeight / img.naturalWidth : 2 / 3
+            api.updateEl(id, { h: Math.round(300 * Math.min(3, Math.max(0.2, ratio))) })
+          }
+          img.src = src
+          const id = api.addEl(targetPage, { kind: 'image', variant: 'illustration', src, x, y, w, h })
+        })
+      })
+      return
+    }
+
     const payload = e.dataTransfer.getData('application/x-paiban-component')
     if (!payload) return
     const parsed = JSON.parse(payload) as Partial<El>
@@ -633,14 +709,55 @@ function PageView({ api, pageIdx, dropTarget, isLast, onHoverPage, onGhost }: { 
     const ae = document.activeElement as HTMLElement | null
     if (ae && ae !== document.body) ae.blur()
     if (!api.drawMode) {
-      api.setSelection(null)
+      /* 空白处拖动 = 框选多个组件（单纯点一下 = 取消选择）。
+       * 按住 Shift / Cmd 拖则是「加选」：框到的并进已有选择。 */
       api.setEditingId(null)
+      const additive = e.shiftKey || e.metaKey || e.ctrlKey
+      if (!additive) api.clearSelection()
+      const keep = additive ? api.selectedIds.slice() : []
+      const rect = pageRef.current!.getBoundingClientRect()
+      const sx = (e.clientX - rect.left) / zoom
+      const sy = (e.clientY - rect.top) / zoom
+      let last: { x: number; y: number; w: number; h: number } | null = null
+      const move = (ev: PointerEvent) => {
+        const cx = (ev.clientX - rect.left) / zoom
+        const cy = (ev.clientY - rect.top) / zoom
+        const box = {
+          x: Math.min(sx, cx),
+          y: Math.min(sy, cy),
+          w: Math.abs(cx - sx),
+          h: Math.abs(cy - sy),
+        }
+        if (box.w < 3 && box.h < 3) return
+        last = box
+        if (box.w >= 4 && box.h >= 4) {
+          setBandMode('marquee')
+          setBand(box)
+        }
+      }
+      const up = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        setBand(null)
+        const box = last
+        if (!box) return
+        const els = api.getDoc().pages[pageIdx]?.els ?? []
+        const hit = els
+          .filter((x) => !x.background && x.kind !== 'region')
+          .filter((x) => !(x.x + x.w < box.x || x.x > box.x + box.w || x.y + x.h < box.y || x.y > box.y + box.h))
+          .map((x) => x.id)
+        const ids = Array.from(new Set([...keep, ...hit]))
+        if (ids.length) api.setSelectionGroup(ids)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
       return
     }
     e.preventDefault()
     const rect = pageRef.current!.getBoundingClientRect()
     const sx = (e.clientX - rect.left) / zoom
     const sy = (e.clientY - rect.top) / zoom
+    setBandMode('region')
     setBand({ x: sx, y: sy, w: 0, h: 0 })
     const move = (ev: PointerEvent) => {
       const cx = (ev.clientX - rect.left) / zoom
@@ -704,7 +821,12 @@ function PageView({ api, pageIdx, dropTarget, isLast, onHoverPage, onGhost }: { 
         {page?.els.map((el) => (
           <ElView key={el.id} el={el} api={api} pageIdx={pageIdx} onHoverPage={onHoverPage} onGhost={onGhost} />
         ))}
-        {band && <div className="ed-band" style={{ left: band.x, top: band.y, width: band.w, height: band.h }} />}
+        {band && (
+          <div
+            className={`ed-band${bandMode === 'marquee' ? ' is-marquee' : ''}`}
+            style={{ left: band.x, top: band.y, width: band.w, height: band.h }}
+          />
+        )}
         <div className="ed-page-tag">
           第 {pageIdx + 1} 页 / 共 {doc.pages.length} 页
         </div>
@@ -718,10 +840,32 @@ export function Canvas({ api }: { api: EditorApi }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [dragPage, setDragPage] = useState<number | null>(null)
   const [dragGhost, setDragGhost] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** 右键菜单：鼠标位置 + 目标组件 + 右键那一刻的选中集合 */
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string; ids: string[] } | null>(null)
   const zoomRef = useRef(api.zoom)
   zoomRef.current = api.zoom
   // 捏合锚点：记住手势起点的滚动/缩放基准，缩放生效后一次校正（批量事件也精确）
   const pinchRef = useRef<{ sx: number; sy: number; zoom: number; ax: number; ay: number } | null>(null)
+
+  /**
+   * 自动测量的「闸」。
+   *
+   * 测量是个闭环：量 DOM 高度 → 写回 doc → 重渲染 → 再量。排不下就跨页切一刀，切出续块再量。
+   * 正常情况下几轮就收敛。但只要出现「量出来的高度来回摆」或「切完还是装不下」，
+   * 这个环就永远转不停，React 连撞 50 次后直接抛 #185（Maximum update depth），整个编辑器崩掉。
+   * 线上就踩过一次：一份 5 页的稿子打开即白屏。
+   *
+   * 所以给环上两道闸：同一元素改太多次 / 切太多次，就放弃自动调整，让它原地溢出。
+   * 版面可能不完美，但页面不会崩，用户可以手动拖一下收场。
+   */
+  const splitTries = useRef(new Map<string, number>())
+  const heightTries = useRef(new Map<string, number>())
+  /** 内容比一栏还高的块，提示过一次就不再重复 */
+  const overflowWarned = useRef(new Set<string>())
+  /** 连续多少轮测量还在改东西。一直不收敛就整体收手，防止不同元素轮流改把环续上 */
+  const measureRounds = useRef(0)
+  /** 收手后的冷却截止时间：过了这个点用户再编辑，正常恢复自动测量 */
+  const measureCooldown = useRef(0)
 
   // 双指捏合 / Ctrl+滚轮：只缩放中间模板（接管浏览器整页缩放），锚点在指针位置
   useEffect(() => {
@@ -765,6 +909,12 @@ export function Canvas({ api }: { api: EditorApi }) {
     if (api.editingId || api.isTxActive()) return
     if (api.doc.flow?.autoHeight === false) return
 
+    // 上一轮撞到上限、还在冷却里：这一段不量。冷却过了重新计数，
+    // 元素级的闸还是有效的，所以不会二次跑回死循环。
+    const now = Date.now()
+    if (now < measureCooldown.current) return
+    if (measureRounds.current > MAX_MEASURE_ROUNDS) measureRounds.current = 0
+
     const heights: Record<string, number> = {}
     const els = new Map<string, El>()
     for (const page of api.doc.pages) for (const el of page.els) els.set(el.id, el)
@@ -792,7 +942,7 @@ export function Canvas({ api }: { api: EditorApi }) {
       const pageNode = node.closest('.ed-page') as HTMLElement | null
       const pageIdx = Number(pageNode?.getAttribute('data-page-idx') ?? 0)
       const geom = getGeometry(api.doc, pageIdx)
-      const textLike = el.kind === 'text' || (el.kind === 'box' && el.variant !== 'table' && el.variant !== 'qr')
+      const textLike = SPLITTABLE_VARIANTS.has(el.variant)
       const pageRect = pageNode?.getBoundingClientRect()
       const slotRect = slot.getBoundingClientRect()
       // 以 DOM 实际位置判断是否跨页，避免 doc 与 DOM 在连续回流中短暂不同步
@@ -808,10 +958,20 @@ export function Canvas({ api }: { api: EditorApi }) {
 
       // 文字块跨页：按整行切开，上半段留在原栏，下半段生成新组件接到下一栏
       if (textLike && !fits && startsAboveBottom && natural > 40) {
+        const tries = splitTries.current.get(el.id) ?? 0
+        if (tries >= MAX_SPLIT_TRIES) {
+          // 切了这么多次仍然装不下：再切只会无限生出续块，直接把这一块放掉，让它溢出到页外
+          if (tries === MAX_SPLIT_TRIES) {
+            splitTries.current.set(el.id, tries + 1)
+            console.warn('[paiban] 该块连续切分仍装不下，停止自动切分：', el.id, el.variant, el.h, natural)
+          }
+          continue
+        }
         const cutoff = pageRect ? pageRect.top + geom.bottom * api.zoom : 0
         const payload = splitSlotAt(slot, cutoff, api.zoom, natural)
         if (payload) {
           splitDone = true
+          splitTries.current.set(el.id, tries + 1)
           api.splitTextElement(el.id, payload)
           break
         }
@@ -821,20 +981,63 @@ export function Canvas({ api }: { api: EditorApi }) {
         }
       }
 
-      if (heightLocked) {
-        // 只向上长，不缩回：用户手动设的更大高度要保留
-        if (natural > el.h + 1) heights[el.id] = natural
-      } else if (Math.abs(natural - el.h) > 0.6) {
-        heights[el.id] = natural
+      let wantHeight = heightLocked ? natural > el.h + 1 : Math.abs(natural - el.h) > 0.6
+      // 已经顶满整栏：这块内容比一栏还高，版面上没地方给。写回去只会被 reflow 压回栏高
+      // （layout.ts 里 `el.h > g.height` 那步），来回拉锯纯属白烧。这里直接不提议改高度。
+      if (wantHeight && natural > el.h && el.h >= geom.height - 0.5) {
+        wantHeight = false
+        // 只说一次：这是内容量的问题，不是每帧都要提醒
+        if (!overflowWarned.current.has(el.id)) {
+          overflowWarned.current.add(el.id)
+          console.warn(
+            `[paiban] 该块内容比一栏还高 ${Math.round(natural - el.h)}px，已按栏高截断，多出的部分会压在框外：${el.id} (${el.variant})`,
+          )
+        }
       }
+      if (!wantHeight) {
+        // 这一轮量准了，把之前攒的失败次数清掉
+        heightTries.current.delete(el.id)
+        continue
+      }
+      const htries = heightTries.current.get(el.id) ?? 0
+      if (htries >= MAX_HEIGHT_TRIES) {
+        // 高度在几轮之间来回摆（自然高度和写回值互相拉扯）：锁定当前高度，别再改了
+        if (htries === MAX_HEIGHT_TRIES) {
+          heightTries.current.set(el.id, htries + 1)
+          console.warn('[paiban] 该块高度反复量不准，锁定当前高度：', el.id, el.variant, el.h, natural)
+        }
+        continue
+      }
+      heightTries.current.set(el.id, htries + 1)
+      heights[el.id] = natural
     }
+
+    // 元素被删掉后计数表会留下孤儿项，顺手清掉
+    splitTries.current.forEach((_, id) => {
+      if (!els.has(id)) splitTries.current.delete(id)
+    })
+    heightTries.current.forEach((_, id) => {
+      if (!els.has(id)) heightTries.current.delete(id)
+    })
 
     if (splitDone) return
     if (clearId) {
       api.clearNoFlow(clearId)
       return
     }
-    if (Object.keys(heights).length === 0) return
+    if (Object.keys(heights).length === 0) {
+      // 这一轮没有要改的，说明收敛了，计数归零
+      measureRounds.current = 0
+      return
+    }
+    measureRounds.current += 1
+    if (measureRounds.current > MAX_MEASURE_ROUNDS) {
+      if (measureRounds.current === MAX_MEASURE_ROUNDS + 1) {
+        console.warn('[paiban] 自动测量连续 %d 轮未收敛，暂停自动调整 300ms', MAX_MEASURE_ROUNDS)
+        measureCooldown.current = Date.now() + 300
+      }
+      return
+    }
     api.applyMeasuredHeights(heights)
   }, [api.doc, api.editingId, api.zoom, api])
 
@@ -866,17 +1069,118 @@ export function Canvas({ api }: { api: EditorApi }) {
         <span className="ed-hint">
           {api.drawMode
             ? '在页面上拖出一块区域：落入其中的元素会被约束在区域内'
-            : '拖动移动 · 拖到其他页可跨页 · 方向键与相邻组件换位 · Alt+方向键微调'}
+            : '拖动移动 · Shift/Cmd 点选多块（空白拖框也可）· 右键拆块 / 合并 · Alt+方向键微调'}
         </span>
       </div>
-      <div className="ed-canvas-scroll" ref={scrollRef}>
-        {api.doc.pages.map((_, i) => (
-          <PageView key={i} api={api} pageIdx={i} dropTarget={dragPage === i} isLast={i === api.doc.pages.length - 1} onHoverPage={setDragPage} onGhost={setDragGhost} />
+      <div
+        className="ed-canvas-scroll"
+        ref={scrollRef}
+        onContextMenu={(e) => {
+          // 事件委托：不用给每个元素都挂 handler
+          const node = (e.target as HTMLElement).closest('[data-el-id]') as HTMLElement | null
+          const id = node?.dataset.elId
+          if (!id) return
+          e.preventDefault()
+          /* 右键点的是已选中的块 → 保留整组多选（这样才能右键合并）；
+           * 点的是别的块 → 改成单选它。 */
+          const keep = api.selectedIds.includes(id)
+          if (!keep) api.setSelection(id)
+          const ids = keep ? api.selectedIds : [id]
+          setMenu({ x: e.clientX, y: e.clientY, id, ids })
+        }}
+      >
+        {api.doc.pages.map((p, i) => (
+          <PageView
+            key={p.id}
+            api={api}
+            pageIdx={i}
+            dropTarget={dragPage === i}
+            isLast={i === api.doc.pages.length - 1}
+            onHoverPage={setDragPage}
+            onGhost={setDragGhost}
+          />
         ))}
         {dragPage === api.doc.pages.length && <div className="ed-drop-new-page">松手新建第 {dragPage + 1} 页</div>}
         <button className="ed-add-page" onClick={api.addPage} data-tip="<b>新增一页</b>在文档末尾追加一页（自动带页眉/页脚）">
           ＋ 新增一页
         </button>
+
+        {menu && (() => {
+          const el = api.findEl(menu.id)
+          if (!el) return null
+          const parts = countParts(el.html ?? '')
+          const flowing = el.kind === 'text' || el.kind === 'box'
+          const group = menu.ids.map((id) => api.findEl(id)).filter((x): x is El => !!x)
+          // 能合并的：同 kind、同 variant、不是锁定件
+          const mergeable = group.filter((x) => !x.locked && x.kind === el.kind && x.variant === el.variant)
+
+          /* —— 多选（2 块以上）：合并 / 批量拆 / 批量删 —— */
+          if (group.length > 1) {
+            const items: MenuItem[] = [
+              { head: `已选 ${group.length} 块` },
+              {
+                label: '合并为一块',
+                hint: mergeable.length > 1 ? `可并 ${mergeable.length} 块` : '无同类型块',
+                disabled: mergeable.length < 2,
+                onClick: () => {
+                  const r = api.mergeElements(menu.ids)
+                  if (r.skipped) {
+                    popNotice({
+                      tone: 'warn',
+                      title: `已合并 ${r.ok} 块，跳过 ${r.skipped} 块`,
+                      notes: ['不同类型（组件样式不同）的块不能拼在一起，已原样保留'],
+                      hint: '想一起合并的话，先在属性面板把它们的组件样式改成一致',
+                    })
+                  }
+                },
+              },
+              { sep: true },
+              { label: '每块按段落拆开', hint: '批量', onClick: () => api.splitElements(menu.ids, 'nodes') },
+              { label: '每块均分成 2 块', onClick: () => api.splitElements(menu.ids, 'count', { parts: 2 }) },
+              { sep: true },
+              { label: `删除这 ${group.length} 块`, onClick: () => api.removeSelected() },
+            ]
+            return <ContextMenu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />
+          }
+
+          /* —— 单选 —— */
+          const items: MenuItem[] = [
+            {
+              label: '按段落拆成多块',
+              hint: `${parts} 段`,
+              disabled: parts < 2,
+              onClick: () => api.splitElement(el.id, 'nodes'),
+            },
+            { label: '均分成 2 块', disabled: parts < 2, onClick: () => api.splitElement(el.id, 'count', { parts: 2 }) },
+            { label: '均分成 3 块', disabled: parts < 3, onClick: () => api.splitElement(el.id, 'count', { parts: 3 }) },
+            { label: '按约 420 字均分', disabled: parts < 2, onClick: () => api.splitElement(el.id, 'chars', { chunkChars: 420 }) },
+            {
+              label: '从选中的内部元素处切开',
+              disabled: parts < 2 || api.subSelection?.elId !== el.id,
+              onClick: () => api.splitElement(el.id, 'at'),
+            },
+            { sep: true },
+            {
+              label: '与下一块合并',
+              hint: '同栏同类型',
+              disabled: !flowing,
+              onClick: () => {
+                if (!api.mergeWithNext(el.id)) {
+                  popNotice({
+                    tone: 'warn',
+                    title: '下一块类型不同，合并不了',
+                    hint: '按住 Cmd / Ctrl 点选多块，再右键「合并为一块」可以一次拼起来',
+                  })
+                }
+              },
+            },
+            { sep: true },
+            { label: '复制一份', onClick: () => api.duplicateEl(el.id) },
+            { label: el.locked ? '解锁' : '锁定位置', onClick: () => api.toggleLock(el.id) },
+            { label: '删除', onClick: () => api.removeEl(el.id) },
+          ]
+          return <ContextMenu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />
+        })()}
         {dragGhost && (() => {
           const gel = api.findEl(dragGhost.id)
           if (!gel) return null

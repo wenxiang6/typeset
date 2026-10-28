@@ -5,6 +5,12 @@
  * - 单文件 / file:// 环境：本地路径直接用 file://，public 路径改成相对路径
  * - public 目录（/images/…）在 http 下原样使用
  */
+/** Windows 盘符绝对路径：C:\Users\... / D:/素材/... */
+const WIN_DRIVE = /^[A-Za-z]:[\\/]/
+
+/** 系统绝对路径（macOS / Linux） */
+const UNIX_ABS = /^\/(Users|home|Volumes|mnt|media|opt|srv|private)\//
+
 export function resolveImageSrc(src?: string): string | undefined {
   const s = (src ?? '').trim()
   if (!s) return s
@@ -22,15 +28,24 @@ export function resolveImageSrc(src?: string): string | undefined {
     // 单文件版直接用 file://（同源协议下浏览器允许图片读取）
     if (isFilePage) return s
     try {
-      const pathname = decodeURIComponent(new URL(s).pathname)
+      const u = new URL(s)
+      // Windows 的 file:///C:/... pathname 是 "/C:/..."，保留盘符段
+      const pathname = decodeURIComponent(u.pathname)
       return toLocal(pathname)
     } catch {
       return s
     }
   }
 
+  // Windows 盘符路径：统一斜杠后交给 /@local（桌面版代理按平台 normalize）
+  if (WIN_DRIVE.test(s)) {
+    const unified = s.replace(/\\/g, '/')
+    if (isFilePage) return `file:///${encodeURI(unified)}`
+    return toLocal(unified)
+  }
+
   // 系统绝对路径（macOS / Linux）
-  if (/^\/(Users|home|Volumes)\//.test(s)) {
+  if (UNIX_ABS.test(s)) {
     if (isFilePage) return `file://${encodeURI(s)}`
     return toLocal(s)
   }
@@ -48,5 +63,5 @@ function toLocal(absPath: string) {
 /** 是否是本地磁盘路径（用于提示用户） */
 export function isLocalPath(src?: string): boolean {
   const s = (src ?? '').trim()
-  return s.startsWith('file://') || /^\/(Users|home|Volumes)\//.test(s)
+  return s.startsWith('file://') || UNIX_ABS.test(s) || WIN_DRIVE.test(s)
 }

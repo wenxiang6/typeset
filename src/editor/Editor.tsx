@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useEditor } from './store'
 import { rememberSelection } from './format'
 import { openPrintPreview } from './print'
+import { fileToCompactDataURL } from './imageTools'
 import './tooltip.css'
 import { Toolbar } from './Toolbar'
 import { FormatBar } from './FormatBar'
@@ -15,7 +16,18 @@ import './widgets.css'
 function isTyping() {
   const el = document.activeElement as HTMLElement | null
   if (!el) return false
-  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+}
+
+/**
+ * 焦点在任何表单控件上（含下拉）。方向键要留给下拉改选项，
+ * 但 Ctrl+Z / Ctrl+A 不在此列——改完字号直接撤销是常规操作，
+ * 不该因为焦点还停在下拉框里就失效。
+ */
+function isFormFocus() {
+  const el = document.activeElement as HTMLElement | null
+  if (!el) return false
+  return isTyping() || el.tagName === 'SELECT'
 }
 
 /** 桌面版（Electron）通过预加载脚本注入的桥；网页版没有 */
@@ -117,43 +129,67 @@ export function EditorApp() {
     }
   }, [])
 
+  // api 是 useMemo 出来的新对象，每次渲染都变 —— 全局监听走已有的 apiRef（组件顶部声明），
+  // keydown effect 只绑一次，别每渲染都 remove/add 一遍
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const current = apiRef.current
       const typing = isTyping()
       const mod = e.metaKey || e.ctrlKey
 
       if (e.key === 'Escape') {
-        if (api.editingId) {
+        if (current.editingId) {
           ;(document.activeElement as HTMLElement | null)?.blur()
         } else {
-          api.setSelection(null)
+          current.setSelection(null)
         }
         return
       }
       if (typing) return
 
+      if (mod && e.key.toLowerCase() === 'a') {
+        // 全选当前页（背景、区域块除外）
+        e.preventDefault()
+        const page = current.doc.pages[current.pageIdx]
+        if (!page) return
+        const ids = page.els.filter((x) => !x.background && x.kind !== 'region').map((x) => x.id)
+        if (ids.length) current.setSelectionGroup(ids)
+        return
+      }
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
-        if (e.shiftKey) api.redo()
-        else api.undo()
+        if (e.shiftKey) current.redo()
+        else current.undo()
         return
       }
       if (mod && e.key.toLowerCase() === 'y') {
         e.preventDefault()
-        api.redo()
+        current.redo()
         return
       }
       if (mod && e.key.toLowerCase() === 'd') {
         e.preventDefault()
-        if (api.selection) api.duplicateEl(api.selection)
+        if (current.selection) current.duplicateEl(current.selection)
         return
       }
-      if (!api.selection) return
+      if (mod && (e.key === 'c' || e.key === 'x' || e.key === 'v')) {
+        // 组件级剪贴板；正在输入文字时走浏览器原生行为
+        e.preventDefault()
+        if (e.key === 'c') current.copySel()
+        else if (e.key === 'x') current.cutSel()
+        else current.pasteSel()
+        return
+      }
+      if (!current.selection) return
+      // 光标还停在下拉框/输入框里：方向键与删除键让给控件自己
+      if (isFormFocus()) return
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        if (api.subSelection) return
-        api.removeEl(api.selection)
+        if (current.subSelection) return
+        if (current.selectedIds.length > 1) current.removeSelected()
+        else current.removeEl(current.selection)
         return
       }
       /* 方向键 = 与上下左右最近的相邻组件交换位置；
@@ -178,18 +214,53 @@ export function EditorApp() {
       }
       const delta = nudgeMap[e.key]
 
-      if (api.subSelection) {
-        api.nudgeSub(api.subSelection.elId, api.subSelection.index, delta[0], delta[1])
+      if (current.subSelection) {
+        current.nudgeSub(current.subSelection.elId, current.subSelection.index, delta[0], delta[1])
       } else if (e.altKey) {
         // 不做自动补齐，避免被吸回原位
-        api.nudge(api.selection, delta[0], delta[1])
+        current.nudge(current.selection, delta[0], delta[1])
       } else {
-        api.swapNeighbor(api.selection, dir)
+        current.swapNeighbor(current.selection, dir)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [api])
+  }, [])
+
+  // 粘贴截图 / 复制的图片文件：直接落到当前页（自动压缩后内嵌）
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const current = apiRef.current
+      if (isTyping()) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (!item.type.startsWith('image/')) continue
+        const f = item.getAsFile()
+        if (!f) continue
+        e.preventDefault()
+        fileToCompactDataURL(f).then((src) => {
+          const probe = new Image()
+          probe.onload = () => {
+            const ratio = probe.naturalHeight && probe.naturalWidth ? probe.naturalHeight / probe.naturalWidth : 2 / 3
+            current.addEl(current.pageIdx, {
+              kind: 'image',
+              variant: 'illustration',
+              src,
+              x: 60,
+              y: 60,
+              w: 300,
+              h: Math.round(300 * Math.min(3, Math.max(0.2, ratio))),
+            })
+          }
+          probe.src = src
+        })
+        return
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
 
   const [leftOpen, setLeftOpen] = useState(true) // 侧栏默认展开
   const [rightOpen, setRightOpen] = useState(true)

@@ -6,10 +6,11 @@
 @page { size: A4 landscape; margin: 0; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: "Songti SC", "SimSun", "Noto Serif SC", serif;
+  /* 参考稿（地理周报_第一期.html）用黑体：宋体在纸上偏细，同一字号看着更小 */
+  font-family: "SimHei", "Heiti SC", "Microsoft YaHei", sans-serif;
   background: #e8e8e8;
   color: #000;
-  font-size: 9px;
+  font-size: 14px;
   line-height: 1.5;
 }
 .page, .page * { filter: grayscale(100%); }
@@ -24,7 +25,7 @@ body {
 .page {
   width: 297mm; height: 210mm;
   background: #fff; margin: 10px auto;
-  padding: 10mm 12mm 14mm 12mm;
+  padding: 8mm 10mm 12mm 10mm;
   position: relative; overflow: hidden;
   box-shadow: 0 2px 12px rgba(0,0,0,0.15);
 }
@@ -32,7 +33,7 @@ body {
 /* 页眉 */
 .header {
   display: flex; justify-content: space-between; align-items: center;
-  border-bottom: 2px solid #000; padding-bottom: 5px; margin-bottom: 8px;
+  border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .logo-box {
@@ -42,74 +43,76 @@ body {
 }
 .header-title { font-size: 14px; font-weight: bold; letter-spacing: 3px; }
 .header-title span { font-size: 9px; font-weight: normal; font-style: italic; color: #666; }
-.header-right { text-align: right; font-size: 8.5px; color: #333; }
-.header-right .issue { font-weight: bold; font-size: 10px; }
+.header-right { text-align: right; font-size: 10px; color: #333; }
+.header-right .issue { font-weight: bold; font-size: 12px; }
 
 /* 报头 */
 .masthead {
-  background: #726f6f; color: #fff;
-  padding: 12px 24px; margin-bottom: 10px; position: relative;
+  background: #8d8d8d; color: #fff;
+  padding: 10px 20px; margin-bottom: 8px; position: relative;
 }
 .masthead::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: 0;
   height: 2px; background: #fff;
 }
-.masthead .kicker { font-size: 9px; color: #ccc; letter-spacing: 4px; margin-bottom: 3px; }
-.masthead h1 { font-size: 26px; font-weight: 900; letter-spacing: 3px; line-height: 1.1; margin-bottom: 4px; }
-.masthead .sub { font-size: 9px; color: #999; letter-spacing: 4px; }
+.masthead .kicker { font-size: 16px; color: #e6e4e4; letter-spacing: 4px; margin-bottom: 3px; font-weight: 700; }
+.masthead h1 { font-size: 24px; font-weight: 900; letter-spacing: 3px; line-height: 1.1; margin-bottom: 3px; }
+.masthead .sub { font-size: 14px; color: #eaeaea; letter-spacing: 4px; font-weight: 700; }
 
 /* 两栏 */
-.content { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.content { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-/* 章节 */
-.section { margin-bottom: 8px; }
+/* 章节：黑底白字编号块 + 黑体粗标题 + 下方细横线（与参考稿一致，不是整条深色底） */
+.section { margin-bottom: 6px; }
 .section-title {
-  display: flex; align-items: center; margin-bottom: 4px;
-  padding-bottom: 2px; border-bottom: 1px solid #999;
+  display: flex; align-items: center;
+  margin: 4px 0 3px 0; padding-bottom: 2px;
+  border-bottom: 1px solid #999;
 }
 .section-title .num {
-  font-size: 10px; font-weight: bold; background: #000; color: #fff;
+  font-size: 12px; font-weight: 700; line-height: 1.3;
+  background: #000; color: #fff;
   padding: 1px 6px; margin-right: 6px;
 }
-.section-title h2 { font-size: 11px; font-weight: 900; letter-spacing: 1px; }
+.section-title h2 { font-size: 13px; font-weight: 900; letter-spacing: 1px; color: #000; }
 
-h3 { font-size: 9.5px; font-weight: bold; margin: 4px 0 2px 0; }
-p { font-size: 8.5px; line-height: 1.55; margin-bottom: 2px; }
+h3 { font-size: 14px; font-weight: bold; margin: 4px 0 2px 0; }
+p { font-size: 14px; line-height: 1.55; margin-bottom: 2px; }
 .label { font-weight: bold; }
 
 .note {
   background: #f0f0f0; border-left: 3px solid #000;
-  padding: 5px 8px; margin: 3px 0; font-size: 8px; line-height: 1.5;
+  padding: 5px 8px; margin: 3px 0; font-size: 13px; line-height: 1.5;
 }
 .concept-box {
-  background: #f5f5f5; padding: 3px 6px; margin-bottom: 2px;
-  font-size: 8px; line-height: 1.4; border-left: 2px solid #999;
+  background: #f5f5f5; padding: 4px 7px; margin-bottom: 3px;
+  font-size: 13px; line-height: 1.45; border-left: 2px solid #999;
 }
 .concept-box .name { font-weight: bold; }
 
 .chain {
-  font-size: 8px; line-height: 1.6; padding: 4px 8px;
+  font-size: 13px; line-height: 1.6; padding: 5px 8px;
   background: #fafafa; margin: 3px 0; border: 1px solid #ddd;
 }
 .chain .arrow { color: #666; font-weight: bold; }
 
-.trap { font-size: 8.5px; line-height: 1.5; margin-bottom: 2px; padding-left: 4px; }
+.trap { font-size: 13px; line-height: 1.5; margin-bottom: 2px; padding-left: 4px; }
 .trap .x { font-weight: bold; margin-right: 4px; }
 .trap .t { font-weight: bold; }
 
-.tpl { border: 2px solid #000; padding: 6px 10px; margin-bottom: 5px; }
-.tpl h4 { font-size: 9.5px; font-weight: bold; margin-bottom: 3px; }
-.tpl p { font-size: 8px; line-height: 1.5; margin-bottom: 3px; }
+.tpl { border: 2px solid #000; background: #fff; padding: 6px 9px; margin-bottom: 5px; }
+.tpl h4 { font-size: 14px; font-weight: bold; margin-bottom: 3px; }
+.tpl p { font-size: 13px; line-height: 1.5; margin-bottom: 3px; }
 .tpl .label { font-weight: bold; }
 
 .quiz {
-  background: #f5f5f5; padding: 5px 8px; margin: 3px 0;
-  font-size: 8px; line-height: 1.5;
+  background: #f5f5f5; padding: 3px 6px; margin: 2px 0;
+  font-size: 11px; line-height: 1.4;
 }
 .quiz .ans { font-weight: bold; }
-.quiz .exp { color: #555; font-size: 7.5px; }
+.quiz .exp { color: #555; font-size: 10px; }
 
-.req { font-size: 8.5px; line-height: 1.6; padding-left: 2px; }
+.req { font-size: 13px; line-height: 1.6; padding-left: 2px; }
 
 .img-ph {
   height: 50px;
@@ -130,20 +133,20 @@ p { font-size: 8.5px; line-height: 1.55; margin-bottom: 2px; }
 }
 
 .footer {
-  position: absolute; bottom: 8mm; left: 12mm; right: 12mm;
-  padding-top: 4px; border-top: 1px solid #000;
+  position: absolute; bottom: 6mm; left: 10mm; right: 10mm;
+  padding-top: 3px; border-top: 1px solid #000;
 }
 .footer-top {
   display: flex; justify-content: space-between;
-  font-size: 8px; color: #333; margin-bottom: 2px;
+  font-size: 10px; color: #333; margin-bottom: 2px;
 }
 .footer-bottom {
   display: flex; justify-content: space-between;
-  font-size: 7.5px; color: #666;
+  font-size: 10px; color: #666;
 }
 .footer-bottom .center { font-weight: bold; }
 
-.name-row { display: flex; gap: 20px; font-size: 8.5px; margin-top: 4px; }
+.name-row { display: flex; gap: 20px; font-size: 13px; margin-top: 4px; }
 .name-row span { border-bottom: 1px solid #000; min-width: 80px; display: inline-block; }
 
 /* ===== 水印配置（改这里就行） ===== */
@@ -182,7 +185,7 @@ p { font-size: 8.5px; line-height: 1.55; margin-bottom: 2px; }
   opacity: var(--watermark-opacity);
   white-space: nowrap;
   margin: var(--watermark-margin-y) var(--watermark-margin-x);
-  font-family: "Songti SC", "SimSun", serif;
+  font-family: "SimHei", "Heiti SC", sans-serif;
 }
 
 @media print {

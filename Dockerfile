@@ -18,11 +18,30 @@ COPY . .
 RUN pnpm build:http
 
 # ---------- 运行阶段 ----------
-FROM nginx:alpine
+# Node 后端一体：静态托管 + node:sqlite 持久化（零 npm 依赖）
+FROM node:22-alpine
 
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
+ENV NODE_ENV=production PORT=80 DB_PATH=/data/paiban.db
 
+# LibreOffice Writer：Word 导入转换用（parse.mjs 调 soffice 转 HTML）
+# font-noto-cjk：中文字体，保证文档转出来中文不缺字
+# chromium：服务器端自动排版用无头浏览器装配版面（客户端就什么环境都不用装）
+# apk 源换成阿里云镜像，国内构建快很多
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache libreoffice-writer font-noto-cjk chromium nss freetype harfbuzz ttf-freefont
+
+COPY --from=builder /app/dist /app/dist
+COPY server.mjs /app/server.mjs
+COPY electron/persist-api.mjs /app/electron/persist-api.mjs
+COPY electron/format-api.mjs /app/electron/format-api.mjs
+# 排版规则与解析器：/api/format 在服务器上跑，必须一起进镜像
+COPY tools/import /app/tools/import
+# 语义 JSON 排版（/api/elements）：纯 Node 计算，不需要 chromium
+COPY tools/layout /app/tools/layout
+
+# SQLite 数据落卷：升级/重建镜像不丢数据
+VOLUME /data
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.mjs"]

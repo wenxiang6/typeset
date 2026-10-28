@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { handleImport, serveImage } from '../tools/import/server-plugin.mjs'
+import { createPersistApi } from './persist-api.mjs'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -71,14 +72,32 @@ async function serveLocalImage(req, res) {
 }
 
 /**
- * @param {{ distDir: string, imagesDir: string, tmpDir: string, log?: (msg: string) => void }} opts
+ * @param {{
+ *   distDir: string, imagesDir: string, tmpDir: string,
+ *   host?: string, port?: number, allowLocal?: boolean,
+ *   dbPath?: string, log?: (msg: string) => void
+ * }} opts
+ *   dbPath：SQLite 数据文件路径；传入即启用存档/快照/模板库持久化 API（桌面版传 userData 下路径）
  * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>}
  */
-export async function startServer({ distDir, imagesDir, tmpDir, log = () => {} }) {
+export async function startServer({
+  distDir,
+  imagesDir,
+  tmpDir,
+  host = '127.0.0.1',
+  port = 0,
+  allowLocal = true,
+  dbPath,
+  log = () => {},
+}) {
   const indexFile = path.join(distDir, 'index.html')
+  const persistApi = dbPath ? await createPersistApi({ dbPath, log }) : null
 
   const route = async (req, res) => {
     const pathname = decodeURIComponent((req.url ?? '/').split('?')[0])
+
+    // 持久化 API：主存档 / 快照 / 模板库（降级时 health 返回 503，前端自动退回 localStorage）
+    if (persistApi && (await persistApi.handle(req, res, pathname))) return
 
     if (pathname === '/@doc-import') {
       // 挂载前缀要剥掉，handleImport 只认请求体
@@ -94,6 +113,13 @@ export async function startServer({ distDir, imagesDir, tmpDir, log = () => {} }
     }
 
     if (pathname.startsWith('/@local/')) {
+      // @local 是「代读本机磁盘」的能力；对外监听时必须关掉，否则等于开放服务器文件读取
+      if (!allowLocal) {
+        res.statusCode = 404
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.end(JSON.stringify({ ok: false, error: '对外服务已禁用本地磁盘代读' }))
+        return
+      }
       req.url = pathname.slice('/@local/'.length)
       await serveLocalImage(req, res)
       return
@@ -122,12 +148,13 @@ export async function startServer({ distDir, imagesDir, tmpDir, log = () => {} }
 
   await new Promise((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
+    server.listen(port, host, resolve)
   })
-  const { port } = server.address()
+  const { port: actualPort } = server.address()
+  const displayHost = host.includes(':') ? `[${host}]` : host
   return {
-    port,
-    url: `http://127.0.0.1:${port}/`,
+    port: actualPort,
+    url: `http://${displayHost}:${actualPort}/`,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   }
 }

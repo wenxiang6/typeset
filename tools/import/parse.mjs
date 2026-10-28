@@ -9,7 +9,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -28,6 +28,11 @@ async function viaTextutil(filePath) {
 /** LibreOffice 常见安装位置（PATH 里没有时逐个试） */
 const SOFFICE_CANDIDATES = [
   'soffice',
+  '/usr/bin/soffice',
+  '/usr/local/bin/soffice',
+  '/usr/lib/libreoffice/program/soffice',
+  '/opt/libreoffice/program/soffice',
+  '/snap/bin/libreoffice',
   '/Applications/LibreOffice.app/Contents/MacOS/soffice',
   'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
   'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
@@ -45,27 +50,37 @@ function decodeHtmlBuffer(buf) {
   }
 }
 
+/** 找到本机实际存在的 soffice：绝对路径逐个 stat，裸名（如 'soffice'）优先交给 PATH */
+async function resolveSoffice() {
+  for (const bin of SOFFICE_CANDIDATES) {
+    if (path.isAbsolute(bin)) {
+      try {
+        if ((await stat(bin)).isFile()) return bin
+      } catch {
+        /* 不存在，试下一个 */
+      }
+    } else if (await inPath(bin)) {
+      return bin
+    }
+  }
+  return null
+}
+
 /** LibreOffice headless 转 HTML（跨平台，装了就能用） */
 async function viaSoffice(filePath) {
+  const bin = await resolveSoffice()
+  if (!bin) throw new Error('没有找到 LibreOffice（soffice）')
   const outDir = await mkdtemp(path.join(os.tmpdir(), 'paiban-lo-'))
   try {
-    let lastErr
-    for (const bin of SOFFICE_CANDIDATES) {
-      try {
-        await execFileAsync(
-          bin,
-          ['--headless', '--norestore', '--convert-to', 'html', '--outdir', outDir, filePath],
-          { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 },
-        )
-        const files = await readdir(outDir)
-        const html = files.find((f) => /\.html?$/i.test(f))
-        if (!html) throw new Error('LibreOffice 没有产出 HTML')
-        return decodeHtmlBuffer(await readFile(path.join(outDir, html)))
-      } catch (err) {
-        lastErr = err
-      }
-    }
-    throw lastErr ?? new Error('没有找到 soffice')
+    await execFileAsync(
+      bin,
+      ['--headless', '--norestore', '--convert-to', 'html', '--outdir', outDir, filePath],
+      { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 },
+    )
+    const files = await readdir(outDir)
+    const html = files.find((f) => /\.html?$/i.test(f))
+    if (!html) throw new Error('LibreOffice 没有产出 HTML')
+    return decodeHtmlBuffer(await readFile(path.join(outDir, html)))
   } finally {
     await rm(outDir, { recursive: true, force: true }).catch(() => {})
   }
@@ -101,11 +116,67 @@ async function viaOfficeCom(filePath, progId) {
   }
 }
 
+/** 命令是否在 PATH 里（Linux/macOS 用 which，Windows 用 where） */
+async function inPath(name) {
+  const probe = process.platform === 'win32' ? 'where' : 'which'
+  try {
+    await execFileAsync(probe, [name], { timeout: 5000, windowsHide: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** 本机可用的转换器（按优先级），用于错误提示 */
 export function converterChain() {
   if (process.platform === 'darwin') return ['textutil', 'soffice']
   if (process.platform === 'win32') return ['soffice', 'Word COM', 'WPS COM']
   return ['soffice']
+}
+
+/**
+ * 逐个体检本机转换器，给启动时 / MCP 用的一句人话报告。
+ * @returns {Promise<Array<{ name: string, bin: string|null, ok: boolean, hint: string }>>}
+ */
+export async function probeConverters() {
+  const out = []
+  const push = async (name, check, hint) => {
+    let bin = null
+    try {
+      bin = await check()
+    } catch {
+      bin = null
+    }
+    out.push({ name, bin, ok: Boolean(bin), hint })
+  }
+
+  if (process.platform === 'darwin') {
+    await push('textutil（macOS 自带）', async () => ((await stat('/usr/bin/textutil')).isFile() ? '/usr/bin/textutil' : null), '系统自带，无需安装')
+  }
+  await push('LibreOffice', resolveSoffice, 'Linux: apt install libreoffice-writer ｜ macOS: brew install --cask libreoffice')
+  if (process.platform === 'win32') {
+    await push('Microsoft Word', async () => ((await inPath('powershell')) && (await inPath('WINWORD.EXE')) ? 'powershell' : null), '安装 Word 后即可用')
+    await push('WPS', async () => ((await inPath('powershell')) && (await inPath('wps.exe')) ? 'powershell' : null), '安装 WPS 后即可用')
+  }
+  return out
+}
+
+/** 一句人话：现在能不能解析 Word，不能的话缺什么 */
+export async function converterReport() {
+  const list = await probeConverters()
+  const ok = list.filter((c) => c.ok)
+  return {
+    ok: ok.length > 0,
+    /** 可用转换器的名字 */
+    available: ok.map((c) => c.name),
+    /** 不可用转换器的名字 */
+    missing: list.filter((c) => !c.ok).map((c) => c.name),
+    /** 给用户看的安装指引 */
+    installHint: list
+      .filter((c) => !c.ok)
+      .map((c) => `${c.name}：${c.hint}`)
+      .join(' ｜ '),
+  }
 }
 
 /** 任意平台：Word/RichText 文件 → HTML 字符串 */

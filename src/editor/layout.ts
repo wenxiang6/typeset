@@ -20,13 +20,19 @@ export const A4 = {
   portrait: { w: 793.7, h: 1122.52 },
 } as const
 
-export const MARGIN = 45.3 // 左右 12mm
-export const COL_GAP = 14.1 // 栏间距 ~3.7mm
+/*
+ * 版心对齐参考稿（地理周报_第一期.html 的 A4 横版）：
+ *   .page padding 8mm 10mm 12mm 10mm  → 上 30.2 / 左右 37.8 / 下 45.4
+ *   .content gap 12px
+ * 之前左右 12mm、下边距 60.5，一页少掉约 23px 高、14px 宽，同样内容会多翻一页。
+ */
+export const MARGIN = 37.8 // 左右 10mm
+export const COL_GAP = 12 // 栏间距（参考稿 .content gap）
 export const PAGE_GAP = 4 // 组件紧凑间距
-/** 页脚距页面底部的默认距离（与初始模板一致） */
-export const FOOTER_OFFSET = 60.5
+/** 页脚距页面底部的默认距离 */
+export const FOOTER_OFFSET = 45.4 // 下边距 12mm，页脚压在这块留白里
 /** 页眉起点与固定高度：正文起点不再跟随被拖动的报头 */
-export const HEADER_TOP = 37.8
+export const HEADER_TOP = 30.2 // 上边距 8mm
 export const HEADER_HEIGHT = 34.8
 export const MASTHEAD_HEIGHT = 86.6
 export const DOC_VERSION = 3
@@ -623,8 +629,26 @@ export function renumberPages(doc: Doc) {
  * 全文档回流 + 分页。
  * 会修改传入的 doc（调用方负责传入 clone）。
  */
+/**
+ * 页脚贴底：统一到 doc.h - FOOTER_OFFSET。
+ *
+ * 老稿与模板里存的页脚 y 可能是按旧版下边距（60.5）算的，
+ * 比现在的位置高 15px。排版引擎按 h - FOOTER_OFFSET - 8 当栏底，
+ * 正文就会排到页脚上（冒烟里「内容超出页底未分页」正是这个）。
+ * 页脚是家具，本来就该固定在版心底，统一归位不会伤到正常稿。
+ */
+function alignFooters(doc: Doc) {
+  const y = doc.h - FOOTER_OFFSET
+  for (const page of doc.pages) {
+    for (const el of page.els) {
+      if (el.kind === 'chrome' && el.variant === 'footer' && Math.abs(el.y - y) > 0.5) el.y = y
+    }
+  }
+}
+
 export function reflowDoc(doc: Doc, opts: { compact?: boolean } = {}): Doc {
   if (!doc.pages.length) doc.pages.push({ id: uid('page'), els: [] })
+  alignFooters(doc)
   const compact = opts.compact !== false
   // 关闭自动翻页时只做同页压缩，不跨页
   if (doc.flow?.autoPage === false) {
@@ -701,11 +725,17 @@ export function reflowDoc(doc: Doc, opts: { compact?: boolean } = {}): Doc {
 export function applyHeights(doc: Doc, heights: Record<string, number>, opts: { growLocked?: boolean } = {}): Doc {
   let changed = false
   for (let i = 0; i < doc.pages.length; i++) {
+    const g = getGeometry(doc, i)
     for (const el of doc.pages[i].els) {
       if (!isMeasurable(el)) continue
       const h = heights[el.id]
       if (typeof h !== 'number' || !isFinite(h) || h <= 0) continue
       const next = Math.max(8, Math.ceil(h))
+      // 已经顶到栏底：这是 reflow 把「比一栏还高」的块压成栏高的结果（见上面的 el.h = g.height）。
+      // 它真实内容确实更高，但版面上没有更多空间给它 —— 再写回只会被 reflow 压回去，
+      // 测量与压缩来回打架，最后以 React #185 把编辑器整个搞崩。这种块就放弃自动长高，
+      // 溢出部分留给用户自己调（看得见的溢出，好过白屏）。
+      if (next > el.h && el.h >= g.height - 0.5) continue
       if (el.autoHeight === false) {
         if (!opts.growLocked || next <= el.h + 1) continue
       }
@@ -714,11 +744,11 @@ export function applyHeights(doc: Doc, heights: Record<string, number>, opts: { 
         changed = true
       }
     }
-    // 报头/页眉变高后，内容不能钻到它下面
-    const g = getGeometry(doc, i)
+    // 报头/页眉变高后，内容不能钻到它下面（几何要重算，前面可能刚改过高度）
+    const gAfter = getGeometry(doc, i)
     for (const el of doc.pages[i].els) {
-      if (isFlowable(el) && el.y < g.top - 0.5) {
-        el.y = g.top
+      if (isFlowable(el) && el.y < gAfter.top - 0.5) {
+        el.y = gAfter.top
         changed = true
       }
     }

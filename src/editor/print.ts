@@ -4,8 +4,19 @@ interface PrintOptions {
   w: number
   h: number
   orientation: Orientation
-  /** 初始配色。默认彩色；打开后可在弹窗里随时切换 */
+  /** 初始配色。默认读上次的选择；打开后可在弹窗里随时切换 */
   bw?: boolean
+}
+
+/** 记住上次的黑白/彩色（下次打开预览直接用）；实际写入发生在弹窗内切换时 */
+const BW_KEY = 'paiban-print-bw-v1'
+
+function readPrintBw(): boolean {
+  try {
+    return localStorage.getItem(BW_KEY) === '1'
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -18,7 +29,7 @@ interface PrintOptions {
  *
  * 彩色/黑白是弹窗内的切换（标题栏分段按钮），不再需要点按钮前先选模式。
  */
-export function openPrintPreview({ w, h, orientation, bw = false }: PrintOptions): HTMLElement {
+export function openPrintPreview({ w, h, orientation, bw = readPrintBw() }: PrintOptions): HTMLElement {
   const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
     .map((n) => n.outerHTML)
     .join('\n')
@@ -170,6 +181,7 @@ export function openPrintPreview({ w, h, orientation, bw = false }: PrintOptions
       <div class="pv-foot">
         <span class="pv-hint">缩放 <b id="pv-zoom">100%</b> · 在系统打印面板里可「另存为 PDF」</span>
         <div class="pv-actions">
+          <button id="print-pdf">导出 PDF</button>
           <button id="print-cancel">取消</button>
           <button id="print-go" class="primary">打印 / 保存 PDF</button>
         </div>
@@ -210,6 +222,7 @@ export function openPrintPreview({ w, h, orientation, bw = false }: PrintOptions
           colorBtn.classList.toggle('is-on', !isBw);
           bwBtn.classList.toggle('is-on', isBw);
           if (modeLabel) modeLabel.textContent = isBw ? '黑白' : '彩色';
+          try { window.parent.localStorage.setItem('paiban-print-bw-v1', isBw ? '1' : '0'); } catch (e) {}
         }
         colorBtn.onclick = function () { setMode(false); };
         bwBtn.onclick = function () { setMode(true); };
@@ -217,6 +230,28 @@ export function openPrintPreview({ w, h, orientation, bw = false }: PrintOptions
         document.getElementById('print-close').onclick = close;
         document.getElementById('print-cancel').onclick = close;
         document.getElementById('print-go').onclick = function () { window.print(); };
+
+        /* 桌面版：一键导出 PDF（Electron printToPDF 直接落盘），网页版不显示这个按钮 */
+        var pdfBtn = document.getElementById('print-pdf');
+        if (pdfBtn) {
+          if (!(window.parent && window.parent.paibanDesktop && typeof window.parent.paibanDesktop.exportPdf === 'function')) {
+            pdfBtn.style.display = 'none';
+          } else {
+            pdfBtn.onclick = async function () {
+              pdfBtn.disabled = true;
+              var old = pdfBtn.textContent;
+              pdfBtn.textContent = '正在导出…';
+              try {
+                var r = await window.parent.paibanDesktop.exportPdf({ landscape: PAGE_W > PAGE_H });
+                pdfBtn.textContent = r && r.ok ? '已导出 ✓' : '已取消';
+              } catch (err) {
+                pdfBtn.textContent = '导出失败';
+              }
+              setTimeout(function () { pdfBtn.textContent = old; pdfBtn.disabled = false; }, 1600);
+            };
+          }
+        }
+
         window.addEventListener('keydown', function (e) {
           if (e.key === 'Escape') { e.preventDefault(); close(); }
         });

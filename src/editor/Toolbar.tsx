@@ -6,7 +6,8 @@ import { TemplateDialog } from './TemplateDialog'
 import { Notice, type NoticeData } from './Notice'
 import { exportJSON } from './format'
 import { importToDoc, type ImportPayload, type MergeMode } from './importDoc'
-import { agoText, bytesText, clockText, getSaveState, subscribeSaveState, type SnapshotMeta } from './autosave'
+import { agoText, bytesText, clockText, getSaveState, subscribeExternalDoc, subscribeSaveState, type SnapshotMeta } from './autosave'
+import { sanitizeDocHtmls } from './sanitize'
 import {
   IconBookmark, IconCopy, IconDownload, IconEye, IconGrid, IconHistory, IconLock, IconMagnet, IconPrint, IconRedo, IconReset,
   IconTrash, IconUndo, IconUnlock, IconUpload,
@@ -31,6 +32,29 @@ function readMergeMode(): MergeMode {
   return v === 'merge' || v === 'split' ? v : 'auto'
 }
 
+/**
+ * 探一下 Word 解析服务在不在。
+ *
+ * 静态托管（dist 单文件扔 nginx / OSS / Pages）没有 POST /@doc-import 端点，
+ * 请求会落到 index.html 或 404 页面；file:// 下直接连不上。
+ * 点之前就知道，比点完弹一堆 HTML 片段友好得多。
+ */
+async function probeImportService(): Promise<{ ready: boolean; reason: string }> {
+  if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    return { ready: false, reason: '单文件版（双击打开）没有解析服务' }
+  }
+  try {
+    const res = await fetch('/@doc-import', { method: 'GET' })
+    const raw = await res.text()
+    // 服务端对 GET 会回 405 + JSON {"ok":false,"error":"只支持 POST"}
+    const ok = res.status === 405 && raw.trimStart().startsWith('{')
+    if (ok) return { ready: true, reason: '' }
+    return { ready: false, reason: '当前是静态托管，没有解析端点（nginx / OSS / Pages 只发文件，跑不了解析）' }
+  } catch {
+    return { ready: false, reason: '连不上解析服务' }
+  }
+}
+
 export function Toolbar({ api }: { api: EditorApi }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const wordRef = useRef<HTMLInputElement>(null)
@@ -48,6 +72,111 @@ export function Toolbar({ api }: { api: EditorApi }) {
   // 保存状态走订阅式小仓库：只有这个角标会重渲染，画布完全不受影响
   const saveState = useSyncExternalStore(subscribeSaveState, getSaveState, getSaveState)
   const [notice, setNotice] = useState<NoticeData | null>(null)
+  /** null = 探测中；false = 明确没有解析服务，会把 Word 按钮置灰并说明怎么办 */
+  const [svc, setSvc] = useState<{ ready: boolean; reason: string } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    probeImportService().then((r) => {
+      if (alive) setSvc(r)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  /* —— 保存失败要主动喊一声（每次失败只弹一次，恢复后允许再弹） —— */
+  const saveErrShown = useRef(false)
+  useEffect(() => {
+    if (!saveState.ok) saveErrShown.current = false
+  }, [saveState.ok])
+  useEffect(() => {
+    const onSaveError = (e: Event) => {
+      if (saveErrShown.current) return
+      saveErrShown.current = true
+      const detail = (e as CustomEvent<{ error?: string }>).detail
+      setNotice({
+        tone: 'error',
+        title: '自动保存失败',
+        subtitle: detail?.error ?? '本机存储可能已满',
+        notes: [
+          '「立即导出 JSON」把版面先落到磁盘，内容不会丢。',
+          '存档恢复后（删掉一些图片或快照）会自动继续保存。',
+        ],
+        actions: [{ label: '导出 JSON', primary: true, onClick: () => exportJSON(api.getDoc()) }, { label: '知道了' }],
+      })
+    }
+    window.addEventListener('paiban-save-error', onSaveError)
+    return () => window.removeEventListener('paiban-save-error', onSaveError)
+  }, [api])
+
+  /* —— 保存失败状态下关窗口：给一次反悔机会（正常情况 400ms 已落盘，不打扰） —— */
+  useEffect(() => {
+    if (saveState.ok) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [saveState.ok])
+
+  /* —— 检测到另一个窗口改写了存档：让用户选，不静默覆盖 —— */
+  const externalRawRef = useRef('')
+  useEffect(() => {
+    const unsub = subscribeExternalDoc((raw) => {
+      externalRawRef.current = raw
+      setNotice({
+        tone: 'warn',
+        title: '检测到另一个窗口修改了这份版面',
+        subtitle: '同一浏览器的多个标签/窗口共用一份自动存档，同时编辑会互相覆盖。',
+        notes: [
+          '「载入它的版本」= 放弃本窗口的当前内容（可以 Ctrl+Z 反悔）。',
+          '「保留我的」= 本窗口继续编辑，落盘时会盖掉另一个窗口的内容。',
+        ],
+        actions: [
+          { label: '载入它的版本', primary: true, onClick: () => api.loadExternalDoc() },
+          { label: '保留我的' },
+        ],
+      })
+    })
+    return unsub
+  }, [api])
+
+  /* —— 快捷键速查：? 按钮 / Ctrl+/ —— */
+  const [showKeys, setShowKeys] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault()
+        setShowKeys((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  useEffect(() => {
+    if (!showKeys) return
+    setNotice({
+      tone: 'ok',
+      title: '快捷键速查',
+      notes: [
+        'Ctrl+Z / Ctrl+Y —— 撤销 / 重做',
+        'Ctrl+C / Ctrl+X / Ctrl+V —— 复制 / 剪切 / 粘贴选中组件（可跨页）',
+        'Ctrl+D —— 原地复制一份（右下偏移 16px）',
+        'Shift + 点击 —— 按阅读顺序连选多块 · Cmd/Ctrl + 点击 —— 加选 / 取消某一块',
+        '空白处拖动 —— 框选多个组件（按住 Shift 是加选）· Ctrl+A —— 选中本页全部',
+        '选中多块后右键 —— 「合并为一块」把同类型的块拼回去',
+        'Delete / Backspace —— 删除选中组件（多选时一起删）',
+        '方向键 —— 与上下左右相邻的组件交换位置',
+        'Alt + 方向键 —— 微调 1px（再按住 Shift 变 10px）',
+        'Ctrl+/ —— 打开本速查 · Esc —— 关闭弹窗 / 取消编辑',
+        'Ctrl+滚轮 —— 缩放画布 · Ctrl+P —— 打印预览',
+      ],
+      hint: '在文字框里输入时快捷键不生效（保留原生的复制粘贴行为）。',
+    })
+    setShowKeys(false)
+  }, [showKeys])
 
   // 快照列表里的「几秒前」需要自己走秒（编辑器不一定会重渲染）
   useEffect(() => {
@@ -97,7 +226,19 @@ export function Toolbar({ api }: { api: EditorApi }) {
     setImporting(true)
     try {
       const res = await fetch('/@doc-import', { method: 'POST', body: file })
-      const payload = (await res.json()) as ImportPayload
+      const raw = await res.text()
+      let payload: ImportPayload
+      try {
+        payload = JSON.parse(raw) as ImportPayload
+      } catch {
+        // nginx / OSS / Pages 这类纯静态托管没有这个端点，会返回 index.html 或 404 页面
+        const looksHtml = /^\s*<(!doctype|html)/i.test(raw)
+        throw new Error(
+          looksHtml
+            ? 'STATIC_HOST'
+            : `服务端返回了非 JSON（HTTP ${res.status}）${raw.slice(0, 120)}`,
+        )
+      }
       if (!payload.ok) throw new Error(payload.error || `解析失败（HTTP ${res.status}）`)
       const { doc, warnings, merge, groups, orientation } = await importToDoc(payload, { merge: mergeMode, orientation: orient })
       api.importDoc(doc)
@@ -125,13 +266,26 @@ export function Toolbar({ api }: { api: EditorApi }) {
         actions: [{ label: '撤销导入', onClick: () => api.undo() }, { label: '知道了', primary: true }],
       })
     } catch (err) {
-      const msg = String((err as Error)?.message || err)
-      const offline = /Failed to fetch|NetworkError|Load failed/i.test(msg)
+      const rawMsg = String((err as Error)?.message || err)
+      const staticHost = rawMsg === 'STATIC_HOST'
+      const offline = /Failed to fetch|NetworkError|Load failed/i.test(rawMsg)
       setNotice({
         tone: 'error',
-        title: '导入失败',
-        subtitle: msg,
-        notes: offline ? ['Word 解析需要本机服务：请用 pnpm dev 打开编辑器（双击单文件版没有解析能力）。'] : undefined,
+        title: staticHost ? '当前没有解析服务' : '导入失败',
+        subtitle: staticHost
+          ? 'Word 解析需要一个 Node 服务，不是纯前端能力。现在这个页面是静态托管的（dist 单文件 → nginx / OSS / Pages），缺少 POST /@doc-import 端点。'
+          : rawMsg,
+        notes: staticHost
+          ? [
+              '在服务器上改用 Node 服务托管（不要只扔静态文件）：',
+              'pnpm build && pnpm serve --host 0.0.0.0 --port 8080',
+              'pnpm serve --check   # 只体检本机/服务器有没有可用的 Word 转换器',
+              'Linux 服务器还要装转换器：apt install libreoffice-writer（或 yum install libreoffice-writer）',
+              '临时代替：在自己电脑上用桌面版或 pnpm dev 导入，导出 JSON 后在服务器版的模板里载入。',
+            ]
+          : offline
+            ? ['本机 / 服务器上的解析服务没连上：确认 pnpm dev（或 pnpm serve）正在跑。']
+            : undefined,
         actions: [{ label: '知道了', primary: true }],
       })
     } finally {
@@ -257,20 +411,30 @@ export function Toolbar({ api }: { api: EditorApi }) {
             className={`ed-tb-save${saveOpen ? ' is-on' : ''}`}
             data-tip={
               `<b>自动存档</b>编辑中每 10 秒无感存一份（保留最近 12 份，约 2 分钟）<br>` +
-              `上次保存：${saveState.at ? clockText(saveState.at) : '—'}` +
-              `${saveState.ok ? '' : `<br><b style="color:#ff7875">${saveState.error ?? '保存失败'}</b>`}`
+              (saveState.dirty
+                ? '状态：编辑中（还没落盘）<br>'
+                : `上次保存：${saveState.at ? clockText(saveState.at) : '—'}<br>`) +
+              `${saveState.ok ? '' : `<b style="color:#ff7875">${saveState.error ?? '保存失败'}</b>`}`
             }
             onClick={openSave}
           >
             <IconHistory />
-            <i className={`ed-save-dot${saveState.ok ? '' : ' is-err'}`} />
+            <i className={`ed-save-dot${saveState.ok ? (saveState.dirty ? ' is-dirty' : '') : ' is-err'}`} />
           </button>
           {saveOpen && (
             <div className="ed-word-pop ed-save-pop">
               <div className="ed-save-head">
                 <span className="ed-save-state">
                   {saveState.ok ? (
-                    <>上次保存 {saveState.at ? clockText(saveState.at) : '—'}</>
+                    <>
+                      {saveState.dirty ? (
+                        <>
+                          编辑中 <span className="ed-save-when">· 上次保存 {saveState.at ? clockText(saveState.at) : '—'}</span>
+                        </>
+                      ) : (
+                        <>上次保存 {saveState.at ? clockText(saveState.at) : '—'}</>
+                      )}
+                    </>
                   ) : (
                     <b className="is-err">{saveState.error ?? '保存失败'}</b>
                   )}
@@ -334,7 +498,8 @@ export function Toolbar({ api }: { api: EditorApi }) {
             const reader = new FileReader()
             reader.onload = () => {
               try {
-                api.importDoc(JSON.parse(String(reader.result)) as Doc)
+                // 外部文件不信任：统一过 HTML 白名单净化（幂等，自家导出的也不受影响）
+                api.importDoc(sanitizeDocHtmls(JSON.parse(String(reader.result)) as Doc))
               } catch {
                 setNotice({
                   tone: 'error',
@@ -351,9 +516,13 @@ export function Toolbar({ api }: { api: EditorApi }) {
         <div className="ed-word-wrap">
           <button
             className={`ed-tb-word${wordOpen ? ' is-on' : ''}`}
-            disabled={importing}
+            disabled={importing || svc === null || (svc !== null && !svc.ready)}
             onClick={() => setWordOpen((v) => !v)}
-            data-tip="<b>导入 Word 原稿</b>选 .doc / .docx / .rtf，本机解析成组件并替换当前版面；图片自动抽出，抽不到的留占位框。<br>可选导入成横版还是竖版，并设置短条目「合并 / 拆分」。需要 pnpm dev 环境"
+            data-tip={
+              svc && !svc.ready
+                ? `<b>Word 解析不可用</b>${svc.reason}。<br><br>要用 Node 服务托管：<br><code>pnpm build &amp;&amp; pnpm serve --host 0.0.0.0 --port 8080</code><br>Linux 服务器还需装转换器：<code>apt install libreoffice-writer</code><br><br>临时代替：在自己电脑上用桌面版，或 <code>pnpm dev</code> 导入后导出 JSON 再载入。`
+                : '<b>导入 Word 原稿</b>选 .doc / .docx / .rtf，本机解析成组件并替换当前版面；图片自动抽出，抽不到的留占位框。<br>可选导入成横版还是竖版，并设置短条目「合并 / 拆分」。'
+            }
           >
             {importing ? '解析中…' : 'Word'}
           </button>

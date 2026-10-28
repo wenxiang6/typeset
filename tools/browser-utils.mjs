@@ -12,7 +12,13 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-export const BASE = process.env.PAIBAN_URL ?? 'http://127.0.0.1:5173/'
+/**
+ * 编辑器地址。本机开发常用 5174（5173 上可能还挂着别的东西），
+ * 所以不写死端口：先用环境变量 PAIBAN_URL，否则依次探 5174 → 5173，都没起才自己拉一个。
+ */
+export let BASE = process.env.PAIBAN_URL ?? ''
+const BASE_CANDIDATES = ['http://127.0.0.1:5174/', 'http://127.0.0.1:5173/']
+const SPAWN_PORT = 5174
 export const ARTIFACT_DIR = path.join(ROOT, 'artifacts', 'smoke')
 
 let serverPromise = null
@@ -29,13 +35,30 @@ async function reachable(url, timeout = 1200) {
   }
 }
 
+/** 定下用哪个地址：环境变量 > 已在跑的 5174/5173 > 默认 5174 */
+export async function resolveBase() {
+  if (BASE) {
+    if (await reachable(BASE, 800)) return BASE
+    return BASE
+  }
+  for (const url of BASE_CANDIDATES) {
+    if (await reachable(url, 800)) {
+      BASE = url
+      return url
+    }
+  }
+  BASE = `http://127.0.0.1:${SPAWN_PORT}/`
+  return BASE
+}
+
 export async function ensureServer() {
-  if (await reachable(BASE)) return { started: false, url: BASE }
+  const url = await resolveBase()
+  if (await reachable(url)) return { started: false, url }
   if (serverPromise) return serverPromise
   serverPromise = (async () => {
     const vite = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')
     if (!fsSync.existsSync(vite)) throw new Error('找不到 vite，请先执行 pnpm install')
-    const proc = spawn(process.execPath, [vite, '--host', '127.0.0.1', '--port', '5173'], {
+    const proc = spawn(process.execPath, [vite, '--host', '127.0.0.1', '--port', String(SPAWN_PORT), '--strictPort'], {
       cwd: ROOT,
       stdio: 'ignore',
       detached: false,
@@ -47,7 +70,7 @@ export async function ensureServer() {
       if (await reachable(BASE, 500)) return { started: true, url: BASE, proc }
       await sleep(250)
     }
-    throw new Error('Vite dev server 启动超时（http://127.0.0.1:5173）')
+    throw new Error(`Vite dev server 启动超时（${BASE}）`)
   })()
   return serverPromise
 }
@@ -119,6 +142,7 @@ export async function closeBrowser() {
 }
 
 export async function openEditor(browser, { viewport = { width: 1600, height: 1000 } } = {}) {
+  await resolveBase()
   const page = await browser.newPage({ viewport })
   const logs = []
   page.on('console', (m) => {

@@ -3,7 +3,11 @@ import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { docImportPlugin } from './tools/import/server-plugin.mjs'
+
+/** ESM 里没有 __dirname，用它把相对路径钉成绝对路径 */
+const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
 const MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -35,8 +39,11 @@ function localImages(): Plugin {
   const handler = async (req: LocalReq, res: LocalRes) => {
     try {
       const url = decodeURIComponent((req.url ?? '').split('?')[0])
-      const abs = path.posix.normalize(url)
-      if (!abs.startsWith('/') || abs.includes('..')) {
+      // Windows 盘符路径（C:/Users/...）走 win32 语义，其余（/Users/...）走 posix
+      const isWinPath = /^[A-Za-z]:[\\/]/.test(url)
+      const abs = isWinPath ? path.win32.normalize(url) : path.posix.normalize(url)
+      const absolute = isWinPath ? path.win32.isAbsolute(abs) : abs.startsWith('/')
+      if (!absolute || abs.includes('..')) {
         res.statusCode = 400
         res.end('bad path')
         return
@@ -72,6 +79,16 @@ export default defineConfig({
   // 相对资源路径：dist 既能放到任意子目录，也便于构建后内联成单文件
   base: './',
   plugins: [react(), localImages(), docImportPlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        // 编辑器主界面
+        main: here('index.html'),
+        // 服务器端自动装配页（部署后由无头 Chromium 打开，不给人看）
+        format: here('format.html'),
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5173,

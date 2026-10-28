@@ -174,16 +174,16 @@
 }
 .ed-page .name-row span { border-bottom-width: var(--el-line-width, 1px); }
 
-.ed-page .note { border-left-width: var(--el-line-width, 3px); }
+.ed-page .note { border-left: 3px solid #000; border-top: none; border-bottom: none; }
 .ed-page .concept-box { border-left-width: var(--el-line-width, 2px); }
 .ed-page .chain { border-width: var(--el-line-width, 1px); }
-.ed-page .chain { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.ed-page .chain { display: block; padding: 5px 8px; background: #fafafa; }
 .ed-page .chain .node {
-  display: inline-block; padding: 2px 7px; background: #fff;
-  border: 1px solid #dfe2e8; border-radius: 5px; line-height: 1.5;
+  display: inline; padding: 0; background: none;
+  border: none; border-radius: 0; line-height: inherit;
 }
-.ed-page .chain .arrow { color: #5b7cfa; font-weight: 700; padding: 0 1px; }
-.ed-page .tpl { border-width: var(--el-line-width, 2px); }
+.ed-page .chain .arrow { color: #666; font-weight: 700; padding: 0 1px; }
+.ed-page .tpl { border-width: 2px; }
 
 .ed-page .w-lead { border-left-width: var(--el-line-width, 3px); }
 .ed-page .w-quote { border-left-width: var(--el-line-width, 3px); }

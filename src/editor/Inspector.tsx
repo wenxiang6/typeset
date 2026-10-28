@@ -1,54 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EditorApi } from './store'
-import { findRegion, isFurniture, resolveMove } from './layout'
+import { findRegion, getGeometry, isFurniture, resolveMove } from './layout'
 import { componentName } from './componentNames'
-import { FONT_FAMILIES, FONT_SIZES, LETTER_SPACINGS, LINE_HEIGHTS, PRESET_COLORS } from './format'
+import { FONT_FAMILIES, FONT_SIZES, LETTER_SPACINGS, LINE_HEIGHTS } from './format'
 import { buildTable, parseTable, resizeCols, resizeRows, setCell, setHeader } from './table'
 import { buildList, parseList, switchListType, OL_TEMPLATES, UL_TEMPLATES } from './list'
 import { buildChain, parseChain } from './chain'
+import { confirmNotice, popNotice } from './confirmNotice'
+import { fileToCompactDataURL } from './imageTools'
+import { Group, usePanelWidth } from './ui/Group'
+import { ColorField } from './ui/ColorField'
+import { FieldGrid, NumField, Row, SelectField } from './ui/fields'
+import { HtmlDrawer } from './ui/HtmlDrawer'
+import { countParts } from './split'
 
 const LINE_WIDTHS = [1, 2, 3, 4, 6, 8]
 
-function toHex(c?: string): string {
-  if (!c || c === 'transparent') return '#ffffff'
-  if (/^#[0-9a-f]{6}$/i.test(c)) return c
-  if (/^#[0-9a-f]{3}$/i.test(c)) return '#' + c.slice(1).split('').map((x) => x + x).join('')
-  const m = c.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/)
-  if (m) return '#' + [1, 2, 3].map((i) => Number(m[i]).toString(16).padStart(2, '0')).join('')
-  return '#ffffff'
-}
-
-function Num({
-  label,
-  value,
-  onChange,
-  step = 1,
-  disabled,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-  step?: number
-  disabled?: boolean
-}) {
-  return (
-    <label className="ed-num">
-      <span>{label}</span>
-      <input
-        type="number"
-        value={Math.round(value * 10) / 10}
-        step={step}
-        disabled={disabled}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      />
-    </label>
-  )
-}
 
 export function Inspector({ api }: { api: EditorApi }) {
+  const panel = usePanelWidth()
   const sel = api.selection ? api.findEl(api.selection) : null
-  const [htmlDraft, setHtmlDraft] = useState<string | null>(null)
-  useEffect(() => setHtmlDraft(null), [api.selection])
+  /** 多选集合（含主选中） */
+  const multiIds = api.selectedIds
+  /**
+   * 外观改动的落点：多选时是整组，单选时就是这一块。
+   * 位置 / 尺寸（x/y/w/h）不走这里——每块大小本来就不同，批量设同一个值会毁版面。
+   */
+  const setStyle = (patch: Parameters<EditorApi['updateStyle']>[1]) => {
+    if (!sel) return
+    if (multiIds.length > 1) api.updateStyleMany(multiIds, patch)
+    else api.updateStyle(sel.id, patch)
+  }
+  const [htmlOpen, setHtmlOpen] = useState(false)
+  /** 打开抽屉那一刻的 html，取消时用它还原 */
+  const [htmlBase, setHtmlBase] = useState('')
+  // 换选中对象时把抽屉收起来，免得上一个组件的草稿留在屏上
+  useEffect(() => setHtmlOpen(false), [api.selection])
+  /** 当前组件能拆成几段（按根元素的子节点数） */
+  const partCount = useMemo(() => (sel?.html ? countParts(sel.html) : 0), [sel?.html])
   const tableModel = useMemo(() => (sel?.variant === 'table' ? parseTable(sel.html) : null), [sel?.variant, sel?.html])
   const listModel = useMemo(() => (sel?.variant === 'ulist' || sel?.variant === 'olist' ? parseList(sel.html) : null), [sel?.variant, sel?.html])
   const chainModel = useMemo(() => (sel?.variant === 'chain' ? parseChain(sel.html) : null), [sel?.variant, sel?.html])
@@ -75,7 +64,14 @@ export function Inspector({ api }: { api: EditorApi }) {
 
   if (!sel) {
     return (
-      <div className="ed-inspector">
+      <div className="ed-inspector" style={{ width: panel.width }}>
+      <div
+        className="ed-insp-resize"
+        title="拖动调整面板宽度"
+        onPointerDown={panel.onPointerDown}
+        onPointerMove={panel.onPointerMove}
+        onPointerUp={panel.onPointerUp}
+      />
         <div className="ed-panel-title">页面设置</div>
         <div className="ed-insp-body">
           <div className="ed-insp-row">
@@ -105,8 +101,14 @@ export function Inspector({ api }: { api: EditorApi }) {
             <button
               className="is-danger"
               disabled={api.doc.pages.length <= 1}
-              onClick={() => {
-                if (!confirm(`删除第 ${api.pageIdx + 1} 页？该页内容会一并删除。`)) return
+              onClick={async () => {
+                const ok = await confirmNotice({
+                  tone: 'warn',
+                  title: `删除第 ${api.pageIdx + 1} 页？`,
+                  subtitle: '该页内容会一并删除（可以 Ctrl+Z 反悔）。',
+                  okLabel: '删除',
+                })
+                if (!ok) return
                 api.setSelection(null)
                 api.removePage(api.pageIdx)
               }}
@@ -130,8 +132,14 @@ export function Inspector({ api }: { api: EditorApi }) {
           <div className="ed-insp-row">
             <button onClick={() => api.reflow()}>立即重排</button>
             <button
-              onClick={() => {
-                if (confirm('重建分页会按阅读顺序重新排版全部内容（区域辅助框会丢弃），继续？')) api.repair()
+              onClick={async () => {
+                const ok = await confirmNotice({
+                  tone: 'warn',
+                  title: '重建分页？',
+                  subtitle: '会按阅读顺序重新排版全部内容（区域辅助框会丢弃）。',
+                  okLabel: '重建',
+                })
+                if (ok) api.repair()
               }}
             >
               重建分页 / 修复空白页
@@ -182,7 +190,7 @@ export function Inspector({ api }: { api: EditorApi }) {
               onChange={(e) => api.updatePage({ watermark: { ...api.doc.watermark, text: e.target.value } })}
             />
           </label>
-          <Num label="字号" value={api.doc.watermark.size} onChange={(v) => api.updatePage({ watermark: { ...api.doc.watermark, size: v } })} />
+          <NumField label="字号" value={api.doc.watermark.size} onChange={(v) => api.updatePage({ watermark: { ...api.doc.watermark, size: v } })} />
           <label className="ed-field">
             <span>透明度 {api.doc.watermark.opacity}</span>
             <input
@@ -194,7 +202,7 @@ export function Inspector({ api }: { api: EditorApi }) {
               onChange={(e) => api.updatePage({ watermark: { ...api.doc.watermark, opacity: parseFloat(e.target.value) } })}
             />
           </label>
-          <Num label="角度" value={api.doc.watermark.angle} onChange={(v) => api.updatePage({ watermark: { ...api.doc.watermark, angle: v } })} />
+          <NumField label="角度" value={api.doc.watermark.angle} onChange={(v) => api.updatePage({ watermark: { ...api.doc.watermark, angle: v } })} />
 
           <div className="ed-panel-title">网格</div>
           <div className="ed-insp-row">
@@ -289,7 +297,14 @@ export function Inspector({ api }: { api: EditorApi }) {
   }
 
   return (
-    <div className="ed-inspector">
+    <div className="ed-inspector" style={{ width: panel.width }}>
+      <div
+        className="ed-insp-resize"
+        title="拖动调整面板宽度"
+        onPointerDown={panel.onPointerDown}
+        onPointerMove={panel.onPointerMove}
+        onPointerUp={panel.onPointerUp}
+      />
       <div className="ed-panel-title ed-insp-title">
         组件属性 · {componentName(sel)}
         {sel.locked ? '（已锁定）' : ''}
@@ -301,12 +316,79 @@ export function Inspector({ api }: { api: EditorApi }) {
           </div>
         )}
         <div className="ed-insp-grid">
-          <Num label="X" value={sel.x} onChange={(v) => setRect({ x: v })} disabled={sel.locked} />
-          <Num label="Y" value={sel.y} onChange={(v) => setRect({ y: v })} disabled={sel.locked} />
-          <Num label="宽" value={sel.w} onChange={(v) => setRect({ w: Math.max(8, v) })} disabled={sel.locked} />
-          <Num label="高" value={sel.h} onChange={(v) => setRect({ h: Math.max(8, v) })} disabled={sel.locked} />
+          <NumField label="X" value={sel.x} onChange={(v) => setRect({ x: v })} disabled={sel.locked} />
+          <NumField label="Y" value={sel.y} onChange={(v) => setRect({ y: v })} disabled={sel.locked} />
+          <NumField label="宽" value={sel.w} onChange={(v) => setRect({ w: Math.max(8, v) })} disabled={sel.locked} />
+          <NumField label="高" value={sel.h} onChange={(v) => setRect({ h: Math.max(8, v) })} disabled={sel.locked} />
         </div>
 
+        {multiIds.length > 1 && (
+          <div className="ed-insp-multi">
+            <b>已选 {multiIds.length} 块</b>
+            <span>字体/字号/颜色/行距等外观改动会写到全部 {multiIds.length} 块；位置尺寸仍只改实线框这块</span>
+            <button onClick={() => api.setSelection(sel.id)}>只留当前这块</button>
+          </div>
+        )}
+
+        {/* 大块拆小块 / 多块合并：画布右键也有同样入口 */}
+        <Row label="拆分">
+          <select
+            value=""
+            onChange={(e) => {
+              const v = e.target.value
+              if (!v) return
+              if (v === 'nodes') api.splitElement(sel.id, 'nodes')
+              else if (v === 'chars') api.splitElement(sel.id, 'chars', { chunkChars: 420 })
+              else if (v === 'at') api.splitElement(sel.id, 'at')
+              else if (v.startsWith('count')) api.splitElement(sel.id, 'count', { parts: Number(v.slice(5)) })
+            }}
+          >
+            <option value="">选择拆分方式…</option>
+            <option value="nodes" disabled={partCount < 2}>
+              按段落拆成多块（{partCount} 段）
+            </option>
+            <option value="count2" disabled={partCount < 2}>
+              均分成 2 块
+            </option>
+            <option value="count3" disabled={partCount < 3}>
+              均分成 3 块
+            </option>
+            <option value="count4" disabled={partCount < 4}>
+              均分成 4 块
+            </option>
+            <option value="chars" disabled={partCount < 2}>
+              按约 420 字均分
+            </option>
+            <option value="at" disabled={partCount < 2 || api.subSelection?.elId !== sel.id}>
+              从选中的内部元素处切开
+            </option>
+          </select>
+        </Row>
+        <Row label="合并">
+          {multiIds.length > 1 ? (
+            <button
+              className="is-on"
+              onClick={() => {
+                const r = api.mergeElements(multiIds)
+                if (r.skipped) {
+                  popNotice({
+                    tone: 'warn',
+                    title: `已合并 ${r.ok} 块，跳过 ${r.skipped} 块`,
+                    notes: ['不同类型（组件样式不同）的块不能拼在一起，已原样保留'],
+                    hint: '先把它们的组件样式改成一致再合并',
+                  })
+                }
+              }}
+            >
+              合并所选 {multiIds.length} 块
+            </button>
+          ) : (
+            <button onClick={() => api.mergeWithNext(sel.id)}>与下一块合并</button>
+          )}
+          <span className="ed-hint">{multiIds.length > 1 ? '按阅读顺序拼进第一块' : 'Cmd/Ctrl 点选多块可一次合并'}</span>
+        </Row>
+
+        <Group id="structure" title="结构" defaultOpen={false} hint="内部元素 / 链 / 列表 / 表格 / 图层">
         {subParts.length >= 2 && sel.variant !== 'ulist' && sel.variant !== 'olist' && sel.variant !== 'chain' && (
           <>
             <div className="ed-panel-title">内部元素</div>
@@ -344,64 +426,30 @@ export function Inspector({ api }: { api: EditorApi }) {
                         <button onClick={() => mutatePart('down')}>下移</button>
                         <button onClick={() => mutatePart('del')}>删除</button>
                       </div>
-                      <label className="ed-field">
-                        <span>字体</span>
-                        <select value={sub.fontFamily ?? ''} onChange={(e) => api.updateSubStyle(sel.id, idx, { fontFamily: e.target.value })}>
-                          <option value="">默认</option>
-                          {FONT_FAMILIES.map((f) => (
-                            <option key={f.value} value={f.value}>
-                              {f.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="ed-field">
-                        <span>字号</span>
-                        <select
-                          value={sub.fontSize ? parseFloat(sub.fontSize) : ''}
-                          onChange={(e) => api.updateSubStyle(sel.id, idx, { fontSize: e.target.value ? `${e.target.value}px` : '' })}
-                        >
-                          <option value="">默认</option>
-                          {FONT_SIZES.map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="ed-field">
-                        <span>字重</span>
-                        <select value={sub.fontWeight ?? ''} onChange={(e) => api.updateSubStyle(sel.id, idx, { fontWeight: e.target.value })}>
-                          <option value="">默认</option>
-                          {['400', '500', '600', '700', '800'].map((w) => (
-                            <option key={w} value={w}>
-                              {w}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="ed-field">
-                        <span>字色</span>
-                        <div className="ed-colors">
-                          {PRESET_COLORS.map((c) => (
-                            <i
-                              key={c}
-                              className={sub.color === c ? 'is-on' : ''}
-                              style={{ background: c }}
-                              title={c}
-                              onClick={() => api.updateSubStyle(sel.id, idx, { color: c })}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                      <div className="ed-insp-row">
-                        <span>对齐</span>
-                        {(['left', 'center', 'right', 'justify'] as const).map((a) => (
-                          <button key={a} className={sub.align === a ? 'is-on' : ''} onClick={() => api.updateSubStyle(sel.id, idx, { align: a })}>
-                            {a === 'left' ? '左' : a === 'center' ? '中' : a === 'right' ? '右' : '两端'}
-                          </button>
-                        ))}
-                      </div>
+                      <SelectField
+                        label="字体"
+                        value={sub.fontFamily ?? ''}
+                        options={FONT_FAMILIES}
+                        onChange={(v) => api.updateSubStyle(sel.id, idx, { fontFamily: v })}
+                      />
+                      <SelectField
+                        label="字号"
+                        value={sub.fontSize ? parseFloat(sub.fontSize) : ''}
+                        options={FONT_SIZES.map((n) => ({ value: n, label: String(n) }))}
+                        onChange={(v) => api.updateSubStyle(sel.id, idx, { fontSize: v ? `${v}px` : '' })}
+                      />
+                      <SelectField
+                        label="字重"
+                        value={sub.fontWeight ?? ''}
+                        options={['400', '500', '600', '700', '800'].map((w) => ({ value: w, label: w }))}
+                        onChange={(v) => api.updateSubStyle(sel.id, idx, { fontWeight: v })}
+                      />
+                      <ColorField
+                        label="字色"
+                        value={sub.color}
+                        onChange={(c) => api.updateSubStyle(sel.id, idx, { color: c })}
+                        onClear={() => api.updateSubStyle(sel.id, idx, { color: undefined })}
+                      />
                       <div className="ed-insp-row">
                         <span>偏移</span>
                         <label className="ed-sub-offset">
@@ -646,7 +694,9 @@ export function Inspector({ api }: { api: EditorApi }) {
             移动
           </button>
         </div>
+        </Group>
 
+        <Group id="media" title="图片 / 二维码 / 区域" defaultOpen={false}>
         {sel.kind === 'image' && (
           <>
             <label className="ed-field">
@@ -678,16 +728,15 @@ export function Inspector({ api }: { api: EditorApi }) {
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (!f) return
-                const reader = new FileReader()
-                reader.onload = () => api.updateEl(sel.id, { src: String(reader.result) })
-                reader.readAsDataURL(f)
+                // 降采样再入档：直接 base64 原图会把 localStorage 配额吃光
+                fileToCompactDataURL(f).then((src) => api.updateEl(sel.id, { src }))
                 e.target.value = ''
               }}
             />
             <div className="ed-insp-note">
               支持网络图片、public 目录（/images/…）与本地图片：可直接填 <code>file:///Users/…/img1.png</code>；
               「选择本地图片」把图片内嵌进文档（导出 JSON 一并保存）。
-              单文件版（file://）可直接读本机路径；通过 http 打开时本地路径会走开发服务器 /@local 代理。
+              大图会自动压缩到最长边 1600px 再存，防止存档撑爆。
             </div>
           </>
         )}
@@ -721,9 +770,7 @@ export function Inspector({ api }: { api: EditorApi }) {
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (!f) return
-                const reader = new FileReader()
-                reader.onload = () => api.updateEl(sel.id, { src: String(reader.result) })
-                reader.readAsDataURL(f)
+                fileToCompactDataURL(f, { maxEdge: 800, quality: 0.9 }).then((src) => api.updateEl(sel.id, { src }))
                 e.target.value = ''
               }}
             />
@@ -745,162 +792,101 @@ export function Inspector({ api }: { api: EditorApi }) {
             />
           </label>
         )}
+        </Group>
 
+        <Group id="text" title="文字">
         {(sel.kind === 'text' || sel.kind === 'box' || sel.kind === 'chrome') && (
           <>
-            <div className="ed-panel-title">文字</div>
-            <label className="ed-field">
-              <span>字体</span>
-              <select value={style.fontFamily ?? ''} onChange={(e) => api.updateStyle(sel.id, { fontFamily: e.target.value })}>
-                <option value="">默认</option>
-                {FONT_FAMILIES.map((f) => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="ed-field">
-              <span>字号</span>
-              <select value={style.fontSize ? parseFloat(style.fontSize) : ''} onChange={(e) => api.updateStyle(sel.id, { fontSize: `${e.target.value}px` })}>
-                <option value="">默认</option>
-                {FONT_SIZES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="ed-field">
-              <span>字色</span>
-              <div className="ed-colors">
-                {PRESET_COLORS.map((c) => (
-                  <i key={c} style={{ background: c }} onClick={() => api.updateStyle(sel.id, { color: c })} />
-                ))}
-              </div>
-            </label>
-            <label className="ed-field">
-              <span>底色</span>
-              <div className="ed-colors">
-                <i
-                  className={style.background === 'transparent' ? 'is-on' : ''}
-                  style={{ background: 'transparent', border: '1px solid #ccc' }}
-                  title="透明"
-                  onClick={() => api.updateStyle(sel.id, { background: 'transparent' })}
-                />
-                {PRESET_COLORS.map((c) => (
-                  <i
-                    key={c}
-                    className={style.background === c ? 'is-on' : ''}
-                    style={{ background: c }}
-                    title={c}
-                    onClick={() => api.updateStyle(sel.id, { background: c })}
-                  />
-                ))}
-                <span className="ed-color-pick" title="自定义底色">
-                  <input
-                    type="color"
-                    value={toHex(style.background)}
-                    onChange={(e) => api.updateStyle(sel.id, { background: e.target.value })}
-                  />
-                  <span>自定义</span>
-                </span>
-              </div>
-            </label>
+            <FieldGrid cols={4}>
+              <SelectField
+                compact
+                label="字体"
+                value={style.fontFamily ?? ''}
+                options={FONT_FAMILIES}
+                onChange={(v) => setStyle({ fontFamily: v })}
+              />
+              <SelectField
+                compact
+                label="字号"
+                value={style.fontSize ? parseFloat(style.fontSize) : ''}
+                options={FONT_SIZES.map((n) => ({ value: n, label: String(n) }))}
+                onChange={(v) => setStyle({ fontSize: v ? `${v}px` : '' })}
+              />
+              <ColorField
+                compact
+                label="字色"
+                value={style.color}
+                onChange={(c) => setStyle({ color: c })}
+                onClear={() => setStyle({ color: undefined })}
+              />
+              <ColorField
+                compact
+                label="底色"
+                value={style.background}
+                allowTransparent
+                onChange={(c) => setStyle({ background: c })}
+                onClear={() => setStyle({ background: undefined })}
+              />
+            </FieldGrid>
             <div className="ed-insp-note" style={{ marginTop: 0, marginBottom: 8 }}>
               底色 = 组件背景色，会作用到提示框、表格、页脚等内容表面，而不是只改外层选区。
             </div>
-            <label className="ed-field">
-              <span>行距</span>
-              <select value={style.lineHeight ?? ''} onChange={(e) => api.updateStyle(sel.id, { lineHeight: e.target.value })}>
-                <option value="">默认</option>
-                {LINE_HEIGHTS.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="ed-field">
-              <span>字距</span>
-              <select value={style.letterSpacing ?? ''} onChange={(e) => api.updateStyle(sel.id, { letterSpacing: e.target.value })}>
-                <option value="">默认</option>
-                {LETTER_SPACINGS.map((l) => (
-                  <option key={l.value} value={l.value}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="ed-insp-row">
-              <span>对齐</span>
-              {(['left', 'center', 'right', 'justify'] as const).map((a) => (
-                <button key={a} className={(style.align ?? 'left') === a ? 'is-on' : ''} onClick={() => api.updateStyle(sel.id, { align: a })}>
-                  {{ left: '左', center: '中', right: '右', justify: '两端' }[a]}
-                </button>
-              ))}
-            </div>
+            <FieldGrid cols={2}>
+              <SelectField
+                compact
+                label="行距"
+                value={style.lineHeight ?? ''}
+                options={LINE_HEIGHTS.map((n) => ({ value: n, label: String(n) }))}
+                onChange={(v) => setStyle({ lineHeight: v })}
+              />
+              <SelectField
+                compact
+                label="字距"
+                value={style.letterSpacing ?? ''}
+                options={LETTER_SPACINGS}
+                onChange={(v) => setStyle({ letterSpacing: v })}
+              />
+            </FieldGrid>
           </>
         )}
+        </Group>
 
         {sel.html !== undefined && (
-          <details className="ed-html-editor">
-            <summary>HTML 源码 / 高级结构编辑</summary>
-            <textarea
-              rows={7}
-              value={htmlDraft ?? sel.html ?? ''}
-              onChange={(e) => setHtmlDraft(e.target.value)}
-              spellCheck={false}
-            />
-            <div className="ed-insp-row">
-              <button
-                disabled={htmlDraft === null}
-                onClick={() => {
-                  if (htmlDraft === null) return
-                  api.updateEl(sel.id, { html: htmlDraft }, true)
-                  setHtmlDraft(null)
-                }}
-              >
-                应用 HTML
-              </button>
-              <button disabled={htmlDraft === null} onClick={() => setHtmlDraft(null)}>
-                还原
-              </button>
-            </div>
-            <div className="ed-insp-note">会直接替换组件内部结构；表格、时间线等没有专用编辑器的组件可用这里改。</div>
-          </details>
+          <div className="ed-insp-row">
+            <button
+              type="button"
+              onClick={() => {
+                setHtmlBase(sel.html ?? '')
+                // 整个编辑过程算一次操作，撤销一步就回去
+                api.beginTx()
+                setHtmlOpen(true)
+              }}
+            >
+              编辑 HTML（分屏预览）
+            </button>
+            <span className="ed-hint">表格、时间线等没有专用编辑器的组件用这里改</span>
+          </div>
         )}
 
-        <div className="ed-panel-title">外观 / 层级</div>
+        <Group id="look" title="外观 / 层级">
         {sel.kind !== 'image' && (
           sel.kind === 'line' ? (
-            <div className="ed-insp-row">
-              <span>线宽</span>
-              {LINE_WIDTHS.map((v) => (
-                <button key={v} className={Math.round(sel.h) === v ? 'is-on' : ''} onClick={() => setRect({ h: v })}>
-                  {v}
-                </button>
-              ))}
-              <span className="ed-hint">px</span>
-            </div>
+            <SelectField
+              label="线宽"
+              hint="px"
+              value={LINE_WIDTHS.includes(Math.round(sel.h)) ? Math.round(sel.h) : ''}
+              options={LINE_WIDTHS.map((v) => ({ value: v, label: String(v) }))}
+              onChange={(v) => setRect({ h: Number(v) })}
+            />
           ) : (
             <>
-              <div className="ed-insp-row">
-                <span>线宽</span>
-                <button className={!style.lineWidth ? 'is-on' : ''} onClick={() => api.updateStyle(sel.id, { lineWidth: '' })}>
-                  默认
-                </button>
-                {LINE_WIDTHS.map((v) => (
-                  <button
-                    key={v}
-                    className={style.lineWidth === `${v}px` ? 'is-on' : ''}
-                    onClick={() => api.updateStyle(sel.id, { lineWidth: `${v}px` })}
-                  >
-                    {v}
-                  </button>
-                ))}
-                <span className="ed-hint">px</span>
-              </div>
+              <SelectField
+                label="线宽"
+                hint="px"
+                value={style.lineWidth ?? ''}
+                options={LINE_WIDTHS.map((v) => ({ value: `${v}px`, label: String(v) }))}
+                onChange={(v) => setStyle({ lineWidth: v })}
+              />
               <div className="ed-insp-note" style={{ marginTop: 0, marginBottom: 8 }}>
                 线宽作用于该组件自带的边框/分隔线：页眉下划线、报头装饰线、章节下划线、页脚上边框、表格、提示框、分隔线等；没有线时无效。
               </div>
@@ -915,10 +901,49 @@ export function Inspector({ api }: { api: EditorApi }) {
             max={1}
             step={0.05}
             value={style.opacity ?? 1}
-            onChange={(e) => api.updateStyle(sel.id, { opacity: parseFloat(e.target.value) })}
+            onChange={(e) => setStyle({ opacity: parseFloat(e.target.value) })}
           />
         </label>
-        <Num label="旋转" value={style.rotate ?? 0} onChange={(v) => api.updateStyle(sel.id, { rotate: v })} />
+        <NumField label="旋转" value={style.rotate ?? 0} onChange={(v) => setStyle({ rotate: v })} />
+
+        {/* 对齐到版心：单选时最常用的六个方位 */}
+        <div className="ed-insp-row ed-align-row">
+          {(
+            [
+              ['left', '左', '左对齐到版心'],
+              ['cx', '中', '水平居中于版心'],
+              ['right', '右', '右对齐到版心'],
+              ['top', '顶', '顶对齐到版心'],
+              ['cy', '中', '垂直居中于版心'],
+              ['bottom', '底', '底对齐到版心'],
+            ] as Array<['left' | 'cx' | 'right' | 'top' | 'cy' | 'bottom', string, string]>
+          ).map(([k, label, tip]) => (
+            <button
+              key={k}
+              data-tip={`<b>对齐</b>${tip}`}
+              onClick={() => {
+                const doc = api.doc
+                const geo = getGeometry(doc, (selPageIdx < 0 ? api.pageIdx : selPageIdx) || 0)
+                const left = geo.left
+                const right = geo.right
+                const top = geo.top
+                const bottom = geo.bottom
+                if (k === 'left') api.updateEl(sel.id, { x: left })
+                else if (k === 'cx') api.updateEl(sel.id, { x: left + (right - left - sel.w) / 2 })
+                else if (k === 'right') api.updateEl(sel.id, { x: right - sel.w })
+                else if (k === 'top') api.updateEl(sel.id, { y: top })
+                else if (k === 'cy') api.updateEl(sel.id, { y: top + (bottom - top - sel.h) / 2 })
+                else api.updateEl(sel.id, { y: bottom - sel.h })
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="ed-insp-note" style={{ marginTop: 0 }}>
+          对齐是相对版心（左右 12mm / 上下按 A4 版心）的；被锁定或属于页眉/页脚的组件在属性区禁用移动。
+        </div>
+
         <div className="ed-insp-row">
           <button onClick={() => api.setZ(sel.id, 'front')}>置顶</button>
           <button onClick={() => api.setZ(sel.id, 'up')}>上移</button>
@@ -940,9 +965,30 @@ export function Inspector({ api }: { api: EditorApi }) {
           <br />
           页码：第 {(selPageIdx < 0 ? api.pageIdx : selPageIdx) + 1} 页 · z 层级：{Math.round(sel.z)}
           <br />
-          方向键 1px 微调，Shift + 方向键 10px；微调不会触发自动补齐。
+          方向键 = 与上下左右相邻的组件交换位置；Alt + 方向键 = 微调 1px（再按 Shift 变 10px），微调不会触发自动补齐。
         </div>
+        </Group>
       </div>
+
+      <HtmlDrawer
+        open={htmlOpen && sel.html !== undefined}
+        title={componentName(sel)}
+        value={htmlBase}
+        // 停止输入后写回画布：不记历史（事务里），画布上能立刻看到效果
+        onPreview={(html) => api.updateEl(sel.id, { html }, false)}
+        // 应用：把这段编辑合并成一步撤销
+        onApply={(html) => {
+          api.updateEl(sel.id, { html }, false)
+          api.endTx()
+          setHtmlOpen(false)
+        }}
+        // 取消：内容还原成打开时的样子，再结束事务
+        onCancel={() => {
+          api.updateEl(sel.id, { html: htmlBase }, false)
+          api.endTx()
+          setHtmlOpen(false)
+        }}
+      />
     </div>
   )
 }

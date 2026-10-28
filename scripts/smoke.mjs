@@ -20,7 +20,7 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import {
   ARTIFACT_DIR,
-  assert,
+    assert,
   assertInvariants,
   closeBrowser,
   dragElement,
@@ -123,7 +123,6 @@ try {
 
   await test('表格组件：改单元格、加行加列', async () => {
     await resetEditor(page)
-    if (process.env.PAIBAN_DBG) console.log('AFTER-RESET', JSON.stringify(await page.evaluate(() => ({ pages: window.__paibanApi.doc.pages.length, total: window.__paibanApi.doc.pages.reduce((n,p)=>n+p.els.length,0), tables: window.__paibanApi.doc.pages.flatMap(p=>p.els).filter(e=>String(e.html||'').includes('<table')).map(e=>e.id) }))))
     await page.locator('.ed-palette-search input').fill('表格')
     await sleep(200)
     await page.locator('.ed-palette-item', { hasText: '表格' }).click()
@@ -1386,14 +1385,15 @@ try {
       return { victim: el.id, snapAt: list[0].at }
     })
     await waitSettled(page)
-    const gone = await page.evaluate((id) => !window.__paibanApi.doc.pages.some((p) => p.els.some((e) => e.id === id)), victim)
+    const gone = await page.evaluate((id) => !window.__paibanApi.getDoc().pages.some((p) => p.els.some((e) => e.id === id)), victim)
     assert(gone, '组件没有被删掉，用例前提不成立')
 
+    // 注意用 getDoc()（同步看最新值）而不是 api.doc（渲染快照，要等下一帧才更新）
     const restored = await page.evaluate(
       ([id, at]) => {
         const api = window.__paibanApi
         const ok = api.restoreSnapshot(at)
-        const back = api.doc.pages.some((p) => p.els.some((e) => e.id === id))
+        const back = api.getDoc().pages.some((p) => p.els.some((e) => e.id === id))
         return { ok, back }
       },
       [victim, snapAt],
@@ -1406,7 +1406,7 @@ try {
     // 恢复走的是 commit，应该能 Ctrl+Z 回到「删掉」的状态
     await page.evaluate(() => window.__paibanApi.undo())
     await waitSettled(page)
-    const undone = await page.evaluate((id) => !window.__paibanApi.doc.pages.some((p) => p.els.some((e) => e.id === id)), victim)
+    const undone = await page.evaluate((id) => !window.__paibanApi.getDoc().pages.some((p) => p.els.some((e) => e.id === id)), victim)
     assert(undone, '撤销恢复后没有回到删除状态')
     await page.evaluate(() => window.__paibanApi.redo())
     await waitSettled(page)
@@ -1440,6 +1440,90 @@ try {
     assert(result.pages >= 2, `损坏存档没有回退到初始模板：${result.pages} 页`)
     assert(result.backup && result.backup.includes('oops'), '损坏存档没有被备份，后续自动保存会把它盖掉')
     await resetAutosave()
+  })
+
+  await test('组件剪贴板：Ctrl+C / Ctrl+V 跨页粘贴，可撤销', async () => {
+    const before = await page.evaluate(() => {
+      const api = window.__paibanApi
+      const el = api.doc.pages[0].els.find((e) => e.kind === 'text' && !e.locked)
+      api.setSelection(el.id)
+      api.setPageIdx(0)
+      return { id: el.id, x: el.x, y: el.y, pages: api.doc.pages.length }
+    })
+    await waitSettled(page) // 等 selection 的 React 状态提交，快捷键读的是渲染后的值
+    await page.keyboard.press('Control+c')
+    // 换到最后一页粘贴，验证「跨页」
+    await page.evaluate((n) => window.__paibanApi.setPageIdx(n - 1), before.pages)
+    await waitSettled(page)
+    await page.keyboard.press('Control+v')
+    await waitSettled(page)
+    const after = await page.evaluate(
+      ([srcId]) => {
+        const api = window.__paibanApi
+        const src = api.doc.pages.flatMap((p) => p.els).find((e) => e.id === srcId)
+        const pasted = api.findEl(api.selection) // 粘贴后自动选中的就是新组件
+        return {
+          pageIdx: api.pageIdx,
+          pasted: pasted && { id: pasted.id, x: pasted.x, y: pasted.y },
+          src: { x: src.x, y: src.y },
+          selected: api.selection,
+        }
+      },
+      [before.id],
+    )
+    assert(after.pasted && after.pasted.id !== before.id, '粘贴没有生成新组件')
+    assert(after.selected === after.pasted.id, '粘贴后没有选中新组件')
+    assert(after.pageIdx === before.pages - 1, `粘贴没发生在最后一页：${after.pageIdx}`)
+    assertInvariants(await readState(page), '剪贴板粘贴后')
+    await page.evaluate(() => window.__paibanApi.undo())
+    await waitSettled(page)
+  })
+
+  await test('对齐到版心：水平居中 / 左对齐落点正确', async () => {
+    await page.evaluate(() => window.__paibanApi.redo()) // 回到刚才粘贴后的状态（粘贴件还在最后一页）
+    await waitSettled(page)
+    const r = await page.evaluate(() => {
+      const api = window.__paibanApi
+      const el = api.doc.pages[api.pageIdx].els.find((e) => e.kind === 'text' && !e.locked && !['header', 'masthead', 'footer'].includes(e.variant))
+      api.setSelection(el.id)
+      return { id: el.id, w: el.w, docW: api.doc.w, margin: 45.3 }
+    })
+    const buttons = page.locator('.ed-align-row button')
+    await buttons.nth(1).click() // 中（水平居中于版心）
+    await waitSettled(page)
+    const cx = await page.evaluate((id) => window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === id).x, r.id)
+    const wantCx = r.margin + (r.docW - r.margin * 2 - r.w) / 2
+    assert(Math.abs(cx - wantCx) < 0.51, `水平居中落点不对：${cx.toFixed(1)} vs ${wantCx.toFixed(1)}`)
+    await buttons.nth(0).click() // 左（左对齐到版心）
+    await waitSettled(page)
+    const lx = await page.evaluate((id) => window.__paibanApi.doc.pages.flatMap((p) => p.els).find((e) => e.id === id).x, r.id)
+    assert(Math.abs(lx - r.margin) < 0.01, `左对齐落点不对：${lx}`)
+  })
+
+  await test('快捷键速查：Ctrl+/ 打开浮层', async () => {
+    await page.keyboard.press('Control+/')
+    await page.waitForSelector('.ed-notice', { timeout: 5000 })
+    const title = await page.locator('.ed-notice-title').textContent()
+    assert(title?.includes('快捷键'), `浮层标题不对：${title}`)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('.ed-notice', { state: 'detached', timeout: 5000 }).catch(() => {})
+  })
+
+  await test('多标签防覆盖：收到 storage 事件会弹「另一个窗口」提示', async () => {
+    // 真实跨标签由浏览器保证（同 profile 下 storage 事件只发给其他标签）。
+    // 这里直接派发同一事件，验证本方链路：监听 → 提示 → 两个动作按钮。
+    await page.evaluate(() => {
+      const raw = localStorage.getItem('paiban-editor-doc-v1') ?? '{}'
+      window.dispatchEvent(new StorageEvent('storage', { key: 'paiban-editor-doc-v1', newValue: raw }))
+    })
+    const noticed = await page
+      .waitForSelector('.ed-notice-title', { timeout: 8000 })
+      .then(async (n) => (await n.textContent())?.includes('另一个窗口'))
+      .catch(() => false)
+    assert(noticed, '没有弹「另一个窗口修改了存档」的提示')
+    const actions = await page.locator('.ed-notice-foot button').allTextContents()
+    assert(actions.some((t) => t.includes('载入它的版本')), `提示缺少「载入它的版本」动作：${actions.join(' / ')}`)
+    await page.keyboard.press('Escape')
   })
 
   const fatal = logs.filter((l) => l.type === 'pageerror')

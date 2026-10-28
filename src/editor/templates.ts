@@ -1,6 +1,8 @@
 import type { Doc, El } from './types'
 import { DEFAULT_LAYOUT } from './defaultLayout'
 import { clone, reflowDoc } from './layout'
+import { sanitizeDocHtmls } from './sanitize'
+import { fetchServerTemplates, mirrorTemplates } from './serverSync'
 
 export interface Template {
   id: string
@@ -40,11 +42,35 @@ export function loadSavedTemplates(): Template[] {
 export function persistSavedTemplates(list: Template[]): boolean {
   try {
     localStorage.setItem(TEMPLATES_KEY, JSON.stringify(list))
+    mirrorTemplates(list)
     return true
   } catch (err) {
     console.warn('[paiban] 模板保存失败', err)
     return false
   }
+}
+
+/**
+ * 换浏览器/换设备恢复：把服务器上的模板库合并进本地。
+ * 合并策略：服务器在前（同 id 服务器版本优先），本地独有模板保留在后。
+ * 没有服务器或合并后无变化返回 null。
+ */
+export async function mergeTemplatesFromServer(): Promise<Template[] | null> {
+  const remote = await fetchServerTemplates()
+  if (!remote) return null
+  const local = loadSavedTemplates()
+  const seen = new Set<string>()
+  const merged: Template[] = []
+  for (const t of [...remote, ...local] as Template[]) {
+    if (!t || typeof t.id !== 'string' || typeof t.name !== 'string' || !t.doc || !Array.isArray(t.doc.pages)) continue
+    if (seen.has(t.id)) continue
+    seen.add(t.id)
+    merged.push(t)
+  }
+  // 与本地完全一致就不动
+  if (merged.length === local.length && merged.every((t, i) => t.id === local[i].id)) return null
+  persistSavedTemplates(merged)
+  return merged
 }
 
 export function makeTemplate(name: string, doc: Doc): Template {
@@ -86,7 +112,8 @@ export function parseTemplateText(text: string): Template | null {
     const doc = (raw?.doc ?? raw) as Doc
     if (!doc || !Array.isArray(doc.pages) || !doc.pages.length) return null
     const name = typeof raw?.name === 'string' && raw.name.trim() ? raw.name.trim() : '导入的模板'
-    return { id: uid('tpl'), name, createdAt: Date.now(), doc }
+    // 模板是「分享给别人导入」的设计：内容一律过 HTML 白名单净化
+    return { id: uid('tpl'), name, createdAt: Date.now(), doc: sanitizeDocHtmls(doc) }
   } catch {
     return null
   }

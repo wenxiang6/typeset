@@ -40,6 +40,9 @@ body { margin: 0; background: #e8e8e8; }
 .ed-tb-group button.ed-tb-word { background: #1d6f42; border-color: #2a8a55; font-weight: 600; letter-spacing: 0.5px; }
 .ed-tb-group button.ed-tb-word:hover { background: #248a52; }
 .ed-tb-group button.ed-tb-word.is-on { background: #2a8a55; border-color: #46b878; color: #fff; }
+/* 没有解析服务（静态托管 / 单文件版）：置灰但仍然可悬停看原因 */
+.ed-tb-group button.ed-tb-word:disabled { background: #ececec; border-color: #d9d9d9; color: #aaa; cursor: not-allowed; }
+.ed-tb-group button.ed-tb-word:disabled:hover { background: #ececec; }
 .ed-tb-inline { display: flex; align-items: center; gap: 4px; font-size: 12px; }
 .ed-tb-inline select, .ed-formatbar select, .ed-field select, .ed-num input, .ed-field input {
   background: #fff; color: #222; border: 1px solid #ccc; border-radius: 3px; padding: 3px 6px; font-size: 12px;
@@ -148,13 +151,13 @@ body { margin: 0; background: #e8e8e8; }
   position: relative; background: #fff; transform-origin: top left;
   overflow: hidden;
   /* 编辑器内正文：黑体五号（10.5pt / 14px） */
-  font-family: "Lantinghei SC", "PingFang SC", "Heiti SC", "SimHei", "Microsoft YaHei", sans-serif;
+  font-family: "SimHei", "Heiti SC", "Lantinghei SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   line-height: 1.55;
   color: #111;
 }
 .ed-page-tag {
-  position: absolute; right: 6px; bottom: 4px; font-size: 10px; color: #bbb; z-index: 99999;
+  position: absolute; right: 6px; bottom: 4px; font-size: 10px; color: #bbb; z-index: 99999; pointer-events: none;
 }
 .ed-page-drop-hint {
   position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
@@ -248,11 +251,202 @@ body { margin: 0; background: #e8e8e8; }
 /* ---------- 属性面板 ---------- */
 .ed-inspector { width: 260px; background: #fff; border-left: 1px solid #ddd; overflow-y: auto; }
 .ed-insp-body { padding: 10px; }
+
+/* ---------- 属性面板：宽度可拖 + 可折叠分组 ---------- */
+/* 宽度由 Inspector 用内联 style 覆盖，这里的 260 只是兜底 */
+.ed-inspector { position: relative; }
+.ed-insp-resize {
+  position: absolute; top: 0; left: -3px; bottom: 0; width: 6px;
+  cursor: col-resize; z-index: 20;
+  background: transparent;
+}
+.ed-insp-resize:hover, .ed-insp-resize:active { background: rgba(22, 119, 255, 0.25); }
+
+.ed-group { border-top: 1px solid #eceff3; }
+.ed-group:first-child { border-top: 0; }
+.ed-group-head {
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; padding: 7px 2px; margin: 0;
+  background: none; border: 0; cursor: pointer; text-align: left;
+  font-size: 12px; font-weight: 700; color: #444;
+  font-family: inherit;
+}
+.ed-group-head:hover { color: #1677ff; }
+.ed-group-caret { width: 10px; font-size: 10px; color: #999; flex: none; }
+.ed-group-title { flex: 1; letter-spacing: 0.3px; }
+.ed-group-hint { font-size: 10px; font-weight: 400; color: #a2a9b4; }
+.ed-group-body { padding-bottom: 4px; }
+/* 折叠组里的第一条不要再加顶部空白，避免看着空一截 */
+.ed-group-body > :first-child { margin-top: 0; }
+
+/* ---------- 统一颜色控件 ColorField ---------- */
+.ed-colorfield { position: relative; }
+.ed-colorfield > span { display: flex; align-items: center; gap: 6px; }
+.ed-colorfield-hint { font-style: normal; font-weight: 400; font-size: 10px; color: #a2a9b4; }
+.ed-color-trigger {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 3px 6px; border: 1px solid #d7dbe4; border-radius: 5px;
+  background: #fff; cursor: pointer; font-family: inherit;
+}
+.ed-color-trigger:hover { border-color: #1677ff; }
+.ed-color-chip { width: 14px; height: 14px; border-radius: 3px; flex: none; border: 1px solid rgba(0, 0, 0, 0.16); }
+/* 未设置时用棋盘格表示"无颜色"，比空白色块直观 */
+.ed-color-chip.is-empty {
+  background: repeating-conic-gradient(#e9edf2 0% 25%, #fff 0% 50%) 0 0 / 8px 8px;
+}
+.ed-color-trigger code { flex: 1; text-align: left; font-size: 11px; color: #555; }
+.ed-color-trigger-caret { color: #98a2b3; font-size: 10px; }
+
+.ed-colorpop {
+  position: absolute; z-index: 60; left: 0; right: 0; top: 100%; margin-top: 4px;
+  padding: 8px; background: #fff; border: 1px solid #dcdfe6; border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.16);
+}
+.ed-colorpop-title { font-size: 10px; color: #98a2b3; margin: 2px 0 5px; }
+.ed-colorpop-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-bottom: 8px; }
+.ed-colorpop-dot {
+  height: 18px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer; padding: 0;
+}
+.ed-colorpop-dot.is-on { outline: 2px solid #1677ff; outline-offset: 1px; }
+.ed-colorpop-custom { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; }
+.ed-colorpop-custom input[type='color'] { width: 30px; height: 24px; padding: 0; border: 1px solid #d7dbe4; border-radius: 4px; background: #fff; }
+.ed-colorpop-hex { flex: 1; min-width: 0; height: 24px; padding: 0 6px; font-size: 11px; border: 1px solid #d7dbe4; border-radius: 4px; }
+.ed-colorpop-apply { height: 24px; padding: 0 8px; font-size: 11px; }
+.ed-colorpop-foot { display: flex; gap: 6px; }
+.ed-colorpop-foot button { flex: 1; height: 24px; font-size: 11px; }
+.ed-colorpop-foot .is-plain { color: #6b7280; }
+
+/* ---------- HTML 编辑器：从窗口右侧滑出的独立弹窗 ---------- */
+/* 注意：这条链路上的祖先带 backdrop-filter，会创建包含块让 fixed 失效，
+   所以组件用 createPortal 挂到 body，这里的 position: fixed 才真正相对窗口。 */
+.ed-htmlsplit-mask {
+  position: fixed; inset: 0; z-index: 100028;
+  background: rgba(15, 23, 42, 0.28);
+  animation: ed-mask-in 0.16s ease-out;
+}
+.ed-htmlsplit {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: clamp(720px, 64vw, 1100px); max-width: 96vw;
+  z-index: 100029;
+  display: flex; flex-direction: column;
+  background: #fff; border-left: 1px solid #dcdfe6;
+  box-shadow: -18px 0 60px rgba(15, 23, 42, 0.28);
+  animation: ed-drawer-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@keyframes ed-drawer-in {
+  from { transform: translateX(32px); opacity: 0.55; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes ed-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ed-htmlsplit-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid #eceff3;
+  font-size: 13px; flex: none;
+}
+.ed-htmlsplit-sub { font-size: 12px; color: #6b7280; }
+.ed-htmlsplit-dirty {
+  font-size: 11px; color: #b45309; background: #fef3c7;
+  padding: 1px 6px; border-radius: 4px;
+}
+.ed-htmlsplit-keys { margin-left: auto; font-size: 11px; color: #98a2b3; }
+.ed-htmlsplit-close {
+  width: 26px; height: 26px; padding: 0; font-size: 17px; line-height: 1;
+  border: 0; background: none; color: #6b7280; cursor: pointer; border-radius: 4px;
+}
+.ed-htmlsplit-close:hover { background: #f3f4f6; color: #111; }
+.ed-htmlsplit-body { flex: 1; display: flex; min-height: 0; }
+.ed-htmlsplit-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ed-htmlsplit-pane + .ed-htmlsplit-pane { border-left: 1px solid #eceff3; }
+.ed-htmlsplit-pane-tag {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; color: #98a2b3; padding: 6px 16px;
+  border-bottom: 1px solid #f3f4f6; background: #fafbfc; flex: none;
+}
+.ed-htmlsplit-count { margin-left: auto; color: #b0b7c3; }
+.ed-htmlsplit-preview { flex: 1; overflow: auto; background: #eef0f4; padding: 16px; }
+/* 预览用和版面相同的栏宽与报纸样式，所见即所得 */
+.ed-htmlsplit-page {
+  width: 100%; max-width: 540px; margin: 0 auto;
+  background: #fff; padding: 12px 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  font-family: "SimHei", "Heiti SC", "PingFang SC", sans-serif;
+  font-size: 14px; line-height: 1.55;
+}
+.ed-htmlsplit-code {
+  flex: 1; border: 0; outline: none; resize: none;
+  padding: 12px 16px; background: #fff;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.7;
+  white-space: pre; tab-size: 2;
+}
+.ed-htmlsplit-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid #eceff3; flex: none;
+}
+.ed-htmlsplit-hint { flex: 1; font-size: 11px; color: #6b7280; }
+.ed-htmlsplit-hint code { background: #f3f4f6; padding: 0 3px; border-radius: 3px; }
+.ed-htmlsplit-foot button { height: 30px; padding: 0 16px; font-size: 12px; cursor: pointer; }
+.ed-htmlsplit-foot button.is-primary { background: #1677ff; color: #fff; border-color: #1677ff; }
+.ed-htmlsplit-foot button.is-primary:hover { background: #0f62e6; }
 .ed-insp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .ed-num { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #555; }
 .ed-num input { width: 62px; }
 .ed-field { display: block; margin-bottom: 8px; font-size: 12px; color: #555; }
 .ed-field > span { display: block; margin-bottom: 3px; }
+.ed-field-hint { font-style: normal; font-weight: 400; font-size: 10px; color: #a2a9b4; margin-left: 5px; }
+
+/* ---------- 多列并排的紧凑字段（字体 / 字号 / 字色 / 底色 …） ---------- */
+.ed-fg { display: grid; gap: 6px; margin-bottom: 8px; align-items: end; }
+.ed-fg-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; position: relative; }
+.ed-fg-label { font-size: 10px; color: #8b93a1; line-height: 1; }
+.ed-fg-cell select { width: 100%; min-width: 0; height: 24px; padding: 0 2px; font-size: 11px; }
+/* 紧凑色块：只有方块 + 三角，占一格 */
+.ed-color-trigger.is-compact {
+  height: 24px; padding: 0 4px; gap: 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ed-color-trigger.is-compact .ed-color-chip { width: 14px; height: 14px; }
+.ed-color-trigger.is-compact .ed-color-trigger-caret { font-size: 8px; }
+/* 紧凑格的弹窗靠右展开（格子只有 1/4 宽，撑不下） */
+.ed-colorpop.is-compact { left: auto; right: 0; width: 236px; }
+
+/* ---------- 右键菜单 ---------- */
+.ed-ctxmenu {
+  position: fixed; z-index: 100040; min-width: 196px; padding: 4px;
+  background: #fff; border: 1px solid #dcdfe6; border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.18);
+  font-size: 12px;
+  animation: ed-mask-in 0.1s ease-out;
+}
+.ed-ctxmenu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 10px; border: 0; border-radius: 5px; background: none;
+  cursor: pointer; text-align: left; font-family: inherit; font-size: 12px; color: #333;
+}
+.ed-ctxmenu-item:hover:not(:disabled) { background: #f2f5fa; color: #1677ff; }
+.ed-ctxmenu-item:disabled { color: #b7bdc9; cursor: not-allowed; }
+.ed-ctxmenu-item i { margin-left: auto; font-style: normal; font-size: 10px; color: #a2a9b4; }
+.ed-ctxmenu-sep { height: 1px; margin: 4px 6px; background: #eceff3; }
+.ed-ctxmenu-head { padding: 3px 10px 5px; font-size: 11px; font-weight: 600; color: #8a93a3; letter-spacing: 0.02em; }
+
+/* ---------- 多选 ---------- */
+/* 配角块：虚线框、不带控制柄；主选中仍是实线 + 八个控制点 */
+.ed-el.is-multi-selected { outline: 1.5px dashed #4c8fe8; outline-offset: 1px; }
+.ed-band.is-marquee { border-style: solid; border-width: 1px; background: rgba(22, 119, 255, 0.07); }
+.ed-insp-multi {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 8px 0; padding: 7px 9px;
+  border: 1px solid rgba(22, 119, 255, 0.18); border-radius: 8px;
+  background: rgba(22, 119, 255, 0.07);
+  font-size: 11px; color: #46618c;
+}
+.ed-insp-multi b { font-size: 12px; color: #1677ff; }
+.ed-insp-multi span { flex: 1 1 100%; font-size: 10px; color: #7f8ea8; }
+.ed-insp-multi button { font-size: 11px; padding: 2px 8px; }
+.ed-field-hint { font-style: normal; font-weight: 400; font-size: 10px; color: #a2a9b4; margin-left: 5px; }
 .ed-field input, .ed-field select { width: 100%; }
 .ed-insp-row { display: flex; align-items: center; gap: 5px; margin: 8px 0; flex-wrap: wrap; font-size: 12px; color: #555; }
 .ed-insp-note {
@@ -262,10 +456,16 @@ body { margin: 0; background: #e8e8e8; }
 .ed-colors { display: flex; flex-wrap: wrap; gap: 4px; }
 .ed-colors i { width: 16px; height: 16px; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; }
 
-/* ---------- 编辑器内正文排版（与参考稿对齐） ---------- */
+/* ---------- 编辑器内正文排版（数值照抄参考稿 地理周报_第一期.html） ---------- */
+/*
+ * 之前我把正文压到 10.5px 想省页数，结论是错的：字号一小，观感立刻不像报纸。
+ * 现在直接照参考稿的数值来：正文 14px / 行距 1.55，小标题 14px 粗体，
+ * 章节标题 13px、编号块 12px，提示框/概念框/因果链/易错条 13px，测验框 11px。
+ * 元素自带 --el-font-size 时仍以自带的为准，这里只是默认值。
+ */
 .ed-page p { font-size: var(--el-font-size, 14px); line-height: var(--el-line-height, 1.55); margin-bottom: 2px; }
-.ed-page h3 { font-size: var(--el-font-size, 14px); line-height: var(--el-line-height, 1.5); margin: 4px 0 2px; }
-.ed-page .section-title h2 { font-size: var(--el-font-size, 13px); }
+.ed-page h3 { font-size: var(--el-font-size, 14px); line-height: var(--el-line-height, 1.5); margin: 4px 0 2px; font-weight: 700; }
+.ed-page .section-title h2 { font-size: var(--el-font-size, 13px); font-weight: 900; }
 .ed-page .section-title .num { font-size: var(--el-font-size, 12px); }
 .ed-page .note,
 .ed-page .concept-box,
@@ -273,11 +473,10 @@ body { margin: 0; background: #e8e8e8; }
 .ed-page .trap,
 .ed-page .req,
 .ed-page .name-row,
-.ed-page .tpl p,
-.ed-page .tpl h4 { font-size: var(--el-font-size, 13px); line-height: var(--el-line-height, 1.55); }
-.ed-page .tpl h4 { font-weight: 700; }
+.ed-page .tpl p { font-size: var(--el-font-size, 13px); line-height: var(--el-line-height, 1.5); }
+.ed-page .tpl h4 { font-size: var(--el-font-size, 14px); font-weight: 700; }
 .ed-page .quiz { font-size: var(--el-font-size, 11px); line-height: var(--el-line-height, 1.4); }
-.ed-page .quiz .exp { font-size: calc(var(--el-font-size, 11.1px) * 0.9); }
+.ed-page .quiz .exp { font-size: calc(var(--el-font-size, 11px) * 0.91); }
 .ed-page .masthead h1 { font-size: var(--el-font-size, 24px); }
 .ed-page .masthead .kicker { font-size: var(--el-font-size, 16px); font-weight: 700; }
 .ed-page .masthead .sub { font-size: var(--el-font-size, 14px); font-weight: 700; }
@@ -314,9 +513,15 @@ body { margin: 0; background: #e8e8e8; }
   background: #16a34a; box-shadow: 0 0 0 2px #fff;
 }
 .ed-save-dot.is-err { background: #dc2626; box-shadow: 0 0 0 2px #fff, 0 0 6px rgba(220, 38, 38, 0.7); }
+/* 有改动还没落盘（400ms 防抖窗口内）：琥珀色 */
+.ed-save-dot.is-dirty { background: #f59e0b; box-shadow: 0 0 0 2px #fff; }
 .ed-save-pop { width: 304px; }
 .ed-save-head { display: flex; align-items: center; gap: 8px; }
 .ed-save-state { font-size: 11px; color: #4b5563; flex: 1; font-variant-numeric: tabular-nums; }
+.ed-save-when { color: #9aa3b2; }
+/* 对齐到版心的六个方位按钮 */
+.ed-align-row { gap: 4px; }
+.ed-align-row button { min-width: 34px; padding: 4px 6px; }
 .ed-save-state .is-err { color: #dc2626; }
 .ed-word-pop .ed-save-now {
   width: auto; flex: none; padding: 5px 10px; font-size: 11px;
@@ -833,3 +1038,85 @@ body {
   border-color: #e4e7ee;
 }
 .ed-insp-row button:disabled, .ed-insp-row select:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ------------------------------------------------------------------ *
+ * HTML 抽屉的源码区：CSS 在上、HTML 在下，带行号与语法高亮
+ * ------------------------------------------------------------------ */
+
+.ed-source { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.ed-source-block { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.ed-source-block.is-css {
+  flex: 0 0 34%; min-height: 96px;
+  border-bottom: 1px solid #e8ebf1; background: #fbfcfe;
+}
+.ed-source-tag {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px; font-size: 11px; color: #8a93a3;
+  background: #f7f8fb; border-bottom: 1px solid #eef0f4;
+  letter-spacing: 0.02em;
+}
+.ed-source-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #b9c1d0;
+}
+.ed-source-block.is-css .ed-source-dot { background: #f0a43a; }
+
+/* 代码编辑器：透明的 textarea 叠在彩色 pre 上，两层排版参数必须完全一致 */
+.ed-code {
+  position: relative; flex: 1; min-height: 0;
+  display: flex; overflow: hidden; background: #fff;
+}
+.ed-code-gutter {
+  flex: none; width: 46px; overflow: hidden;
+  background: #fafbfd; border-right: 1px solid #eef0f4;
+}
+.ed-code-gutter-inner {
+  padding: 12px 8px 40px 0;
+  text-align: right; color: #b3bbc8;
+  font: 12px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  will-change: transform;
+}
+.ed-code-main { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+
+.ed-code-hl,
+.ed-code-input {
+  position: absolute; top: 0; left: 0;
+  margin: 0; border: 0; padding: 12px 16px;
+  font: 12.5px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0; tab-size: 4;
+  white-space: pre; overflow-wrap: normal; word-break: normal;
+  box-sizing: border-box;
+}
+.ed-code-hl { width: max-content; min-width: 100%; pointer-events: none; will-change: transform; color: #24292f; }
+.ed-code-input {
+  width: 100%; height: 100%; resize: none; outline: none;
+  background: transparent; color: transparent; caret-color: #1f2328;
+  overflow: auto;
+}
+.ed-code-input::selection { background: rgba(22, 119, 255, 0.16); color: transparent; }
+.ed-code-input::placeholder { color: #b8c0cd; }
+
+/* 语法着色：标签名由 JS 按名字算色相（内联 style），其余在这里 */
+.ed-code-hl .tk-attr { color: #8b5cf6; }
+.ed-code-hl .tk-value { color: #b45309; }
+.ed-code-hl .tk-punct { color: #98a1b0; }
+.ed-code-hl .tk-comment { color: #a5acba; font-style: italic; }
+.ed-code-hl .tk-prop { color: #7c3aed; }
+.ed-code-hl .tk-selector { color: #0f766e; }
+
+/* 自动换行：两层必须用同一套换行规则，否则高亮和文字会错位 */
+.ed-code.is-wrap .ed-code-hl {
+  width: 100%; min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.ed-code.is-wrap .ed-code-input {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  overflow-x: hidden;
+}
+.ed-htmlsplit-foot button.is-toggle-on {
+  background: #eef4ff; border-color: #bcd2ff; color: #1d4ed8; font-weight: 600;
+}

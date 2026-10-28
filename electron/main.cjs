@@ -7,7 +7,7 @@
  * - 导入图片 / 本地磁盘图片都要经过一层按白名单读盘的代理
  * 服务只监听回环地址，不对外暴露、不联网。
  */
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron')
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -18,6 +18,28 @@ let win = null
 let server = null
 /** server.mjs 是 ESM，延迟到启动时再 import */
 let startServer = null
+
+/* —— 窗口大小 / 位置记忆（不引依赖，一个 JSON 搞定） —— */
+const stateFile = () => path.join(app.getPath('userData'), 'window-state.json')
+
+function loadWindowBounds() {
+  try {
+    const s = JSON.parse(fs.readFileSync(stateFile(), 'utf8'))
+    if (s && typeof s.width === 'number' && typeof s.height === 'number') return s
+  } catch {
+    /* 没有历史记录，用默认值 */
+  }
+  return null
+}
+
+function saveWindowBounds() {
+  if (!win || win.isMinimized() || win.isFullScreen()) return
+  try {
+    fs.writeFileSync(stateFile(), JSON.stringify(win.getBounds()))
+  } catch {
+    /* 写不进去就算了 */
+  }
+}
 
 /** 单实例：再次启动时把已有窗口提到前面 */
 if (!app.requestSingleInstanceLock()) {
@@ -128,12 +150,22 @@ function buildMenu() {
 
 async function createWindow() {
   const files = appFiles()
+  if (!fs.existsSync(files.distDir)) {
+    dialog.showErrorBox('缺少 dist', '没有找到 dist 目录，请先执行 pnpm build 再启动桌面版。')
+    app.quit()
+    return
+  }
   if (!startServer) ({ startServer } = await import('./server.mjs'))
+  // SQLite 持久化：存档/快照/模板库存到用户目录，换浏览器/重装应用都不丢
+  files.dbPath = path.join(app.getPath('userData'), 'paiban.db')
   server = await startServer({ ...files, log: (m) => console.log(m) })
 
+  const saved = loadWindowBounds()
   win = new BrowserWindow({
-    width: 1500,
-    height: 950,
+    width: saved?.width ?? 1500,
+    height: saved?.height ?? 950,
+    x: typeof saved?.x === 'number' ? saved.x : undefined,
+    y: typeof saved?.y === 'number' ? saved.y : undefined,
     minWidth: 1080,
     minHeight: 680,
     backgroundColor: '#eef1f5',
@@ -184,7 +216,31 @@ app.whenReady().then(async () => {
     return
   }
   buildMenu()
+
+  // 一键导出 PDF：printToPDF 直接落盘，不用过系统打印面板
+  ipcMain.handle('paiban:export-pdf', async (e, opts = {}) => {
+    const sender = BrowserWindow.fromWebContents(e.sender) ?? win
+    if (!sender) return { ok: false, error: 'no window' }
+    const { canceled, filePath } = await dialog.showSaveDialog(sender, {
+      title: '导出 PDF',
+      defaultPath: `地理周刊-${new Date().toISOString().slice(0, 10)}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (canceled || !filePath) return { ok: false, canceled: true }
+    const buf = await sender.webContents.printToPDF({
+      printBackground: true,
+      landscape: Boolean(opts.landscape),
+      pageSize: 'A4',
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+    })
+    fs.writeFileSync(filePath, buf)
+    return { ok: true, filePath }
+  })
+
   await createWindow()
+
+  // 关窗时记一下窗口大小 / 位置
+  win.on('close', saveWindowBounds)
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow()

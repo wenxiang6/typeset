@@ -29,6 +29,10 @@ import {
   sleep,
   waitSettled,
 } from '../browser-utils.mjs'
+import { normalizeLayout, validateLayout } from '../layout/schema.mjs'
+import { buildDoc } from '../layout/geometry.mjs'
+import { imageToDataUrl, resolveLocalImages } from '../layout/local-image.mjs'
+import { DEFAULT_BASE, postElements } from '../layout/index.mjs'
 
 const SERVER_INFO = { name: 'paiban-mcp', version: '1.1.0' }
 const PROTOCOL_VERSION = '2024-11-05'
@@ -282,13 +286,159 @@ const TOOLS = [
     description: '执行项目内置 Playwright 冒烟回归（约 20 秒），返回通过/失败摘要。',
     inputSchema: EMPTY,
   },
+
+  /* —— 语义版面（不依赖浏览器，直接排版）—— */
+  {
+    name: 'validate_layout',
+    description:
+      '校验「语义版面 JSON」：检查块类型白名单、必填字段、内容是否为空，返回错误/提醒和块统计（含汉字数）。不生成版面、不需要浏览器，写完稿先跑这个。' +
+      '语义 JSON 只需要 meta + blocks[]，不要写坐标。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        layout: { type: ['object', 'string'], description: '语义 JSON 对象，或 JSON 字符串' },
+        path: { type: 'string', description: '或者给一个本地 .json 文件路径' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'submit_layout',
+    description:
+      '把语义版面 JSON 排成报纸并推送：默认 POST 到线上服务器 /api/elements，前端刷新即可看到（会先自动存一份快照）。' +
+      '返回页数、组件数、每页两栏填充率。dryRun=true 只本地排版返回报告，不推送。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        layout: { type: ['object', 'string'], description: '语义 JSON 对象或 JSON 字符串' },
+        path: { type: 'string', description: '或者给本地 .json 路径' },
+        base: { type: 'string', description: `服务器地址，默认 ${DEFAULT_BASE}` },
+        orientation: { type: 'string', enum: ['landscape', 'portrait'], description: '覆盖纸张方向' },
+        dryRun: { type: 'boolean', description: '只排版不推送' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'upload_image',
+    description:
+      '读取本机图片，返回宽高比和可直接用于 image 块的 src（local: 开头）。submit_layout 会自动把它转成图片数据上传并在服务器落盘，不需要手动传文件。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '本机图片路径（png/jpg/gif/webp/bmp）' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  },
 ]
+
+/* ------------------------------------------------------------------ *
+ * 语义版面工具（纯 Node / 纯 HTTP，不起浏览器）
+ * ------------------------------------------------------------------ */
+
+/** 从参数里取语义 JSON：对象 / JSON 字符串 / 文件路径都行 */
+async function readLayoutArg(args) {
+  const fromFile = async (p) => fs.readFile(path.resolve(String(p).replace(/^~/, process.env.HOME ?? '')), 'utf8')
+  if (args.layout !== undefined && args.layout !== null) {
+    if (typeof args.layout === 'string') {
+      const s = args.layout.trim()
+      return s.startsWith('{') || s.startsWith('[') ? JSON.parse(s) : fromFile(s)
+    }
+    return args.layout
+  }
+  if (args.path) return fromFile(args.path)
+  throw new Error('需要 layout（语义 JSON 对象 / JSON 字符串）或 path（本地 .json 路径）')
+}
+
+async function layoutTool(name, args = {}) {
+  if (name === 'validate_layout') {
+    const input = await readLayoutArg(args)
+    return { text: JSON.stringify(validateLayout(input), null, 2) }
+  }
+
+  if (name === 'upload_image') {
+    if (!args.path) throw new Error('upload_image 需要 path（本机图片路径）')
+    const img = imageToDataUrl(args.path)
+    // dataUrl 有几 MB，不回传给模型，只告诉它怎么引用
+    const { dataUrl, ...rest } = img
+    return {
+      text: JSON.stringify(
+        {
+          ...rest,
+          usage: { type: 'image', src: rest.src, ratio: rest.ratio },
+          hint: 'src 用上面这个 local: 路径，submit_layout 会自动读文件并上传；不用把图片内容贴进 JSON。',
+        },
+        null,
+        2,
+      ),
+    }
+  }
+
+  if (name === 'submit_layout') {
+    const input = await readLayoutArg(args)
+    const { layout, warnings } = normalizeLayout(input)
+    if (!layout) return { text: JSON.stringify({ ok: false, errors: warnings }, null, 2) }
+    if (args.orientation === 'portrait' || args.orientation === 'landscape') layout.orientation = args.orientation
+
+    // 本机图片 → dataUrl（服务端落盘后改写 src）
+    const img = resolveLocalImages(layout)
+    const allWarnings = [...warnings, ...img.warnings]
+
+    if (args.dryRun) {
+      const { report } = buildDoc(layout)
+      return {
+        text: JSON.stringify({ ok: true, dryRun: true, images: img.resolved, report, warnings: allWarnings }, null, 2),
+      }
+    }
+
+    const base = String(args.base || process.env.PAIBAN_BASE || DEFAULT_BASE).replace(/\/$/, '')
+    try {
+      const res = await postElements(base, layout)
+      const body = res.json ?? { raw: String(res.text).slice(0, 400) }
+      return {
+        text: JSON.stringify(
+          {
+            ok: res.ok,
+            status: res.status,
+            base,
+            images: img.resolved,
+            warnings: allWarnings,
+            result: body,
+            hint: res.ok ? '已推送到服务器：刷新网页（或等自动载入）就能看到，再手工微调即可。' : '推送失败，检查服务器地址与 /api/elements 是否存在。',
+          },
+          null,
+          2,
+        ),
+      }
+    } catch (err) {
+      return {
+        text: JSON.stringify(
+          {
+            ok: false,
+            base,
+            error: String(err?.message || err),
+            hint: '连不上服务器。可以先用 dryRun=true 在本地排版看报告，或把 base 指向自建服务器。',
+          },
+          null,
+          2,
+        ),
+      }
+    }
+  }
+
+  throw new Error(`未知工具 ${name}`)
+}
 
 /* ------------------------------------------------------------------ *
  * 工具实现
  * ------------------------------------------------------------------ */
 
 async function toolResult(name, args = {}) {
+  if (name === 'validate_layout' || name === 'submit_layout' || name === 'upload_image') {
+    return await layoutTool(name, args)
+  }
   const ed = editor()
   switch (name) {
     case 'paiban_status': {
@@ -549,7 +699,8 @@ async function handle(msg) {
       capabilities: { tools: { listChanged: false } },
       serverInfo: SERVER_INFO,
       instructions:
-        '排版周刊编辑器 MCP。先用 paiban_status 看状态，再用 paiban_dom / paiban_console 定位问题；paiban_eval 可直接操作 window.__paibanApi；改动后建议 paiban_run_smoke 回归。',
+        '排版周刊编辑器 MCP。要把稿子排成周刊：先 validate_layout 校验语义 JSON，再 submit_layout 推送（纯 Node + HTTP，不起浏览器）。' +
+        '要检查或调试页面：paiban_status → paiban_dom → paiban_console，paiban_eval 可直接操作 window.__paibanApi。',
     })
     return
   }

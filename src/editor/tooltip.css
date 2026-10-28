@@ -50,7 +50,13 @@
 
 .ed-side .ed-palette,
 .ed-side .ed-inspector {
-  overflow: hidden;
+  /*
+   * 这里原本是 overflow: hidden —— 选择器权重比 .ed-inspector 的 overflow-y: auto 高，
+   * 结果右侧属性面板滚不动，超出的「行距 / 颜色 / HTML」等选项直接被裁掉看不见。
+   * 改成纵向可滚、横向裁掉（横向滚动会露出面板外的东西）。
+   */
+  overflow-x: hidden;
+  overflow-y: auto;
   transition: width 0.18s ease, opacity 0.18s ease;
 }
 

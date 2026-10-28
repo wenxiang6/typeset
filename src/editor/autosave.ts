@@ -3,23 +3,28 @@
  *
  * 两条线并行：
  * 1. **主存档**：任何改动 400ms 后落地（`paiban-editor-doc-v1`），关掉页面/刷新都还在；
- * 2. **滚动快照**：编辑状态下每 10 秒打一份（`paiban-doc-snapshots-v1`，环形 12 份 ≈ 2 分钟），
+ * 2. **滚动快照**：编辑状态下每 10 秒打一份（`paiban-doc-snapshots-v1`，环形 10 份 ≈ 100 秒），
  *    专治「手滑删了 / 拖乱了 / 误点了重置，然后才想起来」——刷新恢复后还能退回去。
  *
  * 存储预算：localStorage 一般 5MB，快照总占用压到 2.5MB 以内，
  * 单份太大（比如整页 base64 图）就只留最新一份，绝不为了快照把主存档挤掉。
+ * 写入成功后会把主存档/快照异步镜像到部署服务器（serverSync，尽力而为）。
  */
+
+import { mirrorDoc, mirrorSnapshots } from './serverSync'
 
 export const DOC_KEY = 'paiban-editor-doc-v1'
 export const SNAP_KEY = 'paiban-doc-snapshots-v1'
 export const SAVE_META_KEY = 'paiban-save-meta-v1'
+/** 已消费过的「外部推送」时间戳：记下来，避免同一份推送反复覆盖本地编辑 */
+export const PUSH_SEEN_KEY = 'paiban-push-seen-v1'
 /** 损坏存档的原样备份（不含时间戳，只留最近一次） */
 export const CORRUPT_KEY = 'paiban-editor-doc-v1.corrupt'
 
 /** 快照间隔：用户要的「10 秒无感保存」 */
 export const SNAP_INTERVAL = 10_000
-/** 最多保留份数 */
-export const SNAP_LIMIT = 12
+/** 最多保留份数（环形覆盖，只留最近 10 份） */
+export const SNAP_LIMIT = 10
 /** 快照总预算（字符数，UTF-16 近似字节） */
 const SNAP_BUDGET = 2_500_000
 
@@ -39,6 +44,8 @@ export interface SaveState {
   at: number | null
   ok: boolean
   bytes: number
+  /** 有改动还没落到 localStorage（400ms 防抖窗口内） */
+  dirty?: boolean
   /** 失败原因（配额满等） */
   error?: string
 }
@@ -66,10 +73,49 @@ export function subscribeSaveState(fn: () => void): () => void {
   }
 }
 
+/** 有未落盘改动时点亮「编辑中」角标（由 store 的保存 effect 调用） */
+export function markDirty() {
+  if (current.dirty) return
+  publish({ ...current, dirty: true })
+}
+
 function publish(next: SaveState) {
-  if (next.at === current.at && next.ok === current.ok && next.bytes === current.bytes && next.error === current.error) return
+  const prev = current
+  if (
+    next.at === prev.at &&
+    next.ok === prev.ok &&
+    next.bytes === prev.bytes &&
+    next.error === prev.error &&
+    Boolean(next.dirty) === Boolean(prev.dirty)
+  ) {
+    return
+  }
   current = next
   for (const fn of saveListeners) fn()
+
+  // 保存状态从「好」翻到「坏」：主动喊一声，别让用户只对着一个红点猜
+  if (prev.ok && !next.ok && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('paiban-save-error', { detail: { error: next.error } }))
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 多标签页 / 多窗口检测
+ *
+ * localStorage 是同一浏览器所有标签共享的。两个窗口各按 400ms 写
+ * 同一个 key，后写的静默盖掉先写的——这是最容易踩的「内容丢失」。
+ * storage 事件只会在「其他标签」触发（本标签不触发），正好用来提醒。
+ * ------------------------------------------------------------------ */
+
+/** 其他窗口改写了主存档（detail 是新写入的原始字符串） */
+export function subscribeExternalDoc(cb: (raw: string) => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const onStorage = (e: StorageEvent) => {
+    if (e.key !== DOC_KEY || e.newValue == null) return
+    cb(e.newValue)
+  }
+  window.addEventListener('storage', onStorage)
+  return () => window.removeEventListener('storage', onStorage)
 }
 
 /** 从 doc 里数出页数/组件数，用于列表展示（不解析整个 doc） */
@@ -152,6 +198,7 @@ export function pushSnapshot(raw: string, doc: unknown): SnapshotMeta[] {
       kept.pop()
     }
   }
+  if (kept.length) mirrorSnapshots(kept)
   return kept.map(({ at, pages, els, bytes }) => ({ at, pages, els, bytes }))
 }
 
@@ -170,6 +217,7 @@ export function clearSnapshots() {
  */
 export function writeDoc(raw: string): SaveState {
   const result = writeDocRaw(raw)
+  if (result.ok) mirrorDoc(raw)
   publish(result)
   return result
 }

@@ -6,4 +6,6 @@ build
 .workbuddy
 *.dmg
 *.doc
+*.tar.gz
+*.db
 .git

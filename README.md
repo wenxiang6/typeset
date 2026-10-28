@@ -143,8 +143,49 @@ pnpm import:verify <doc> --portrait                       # 同一个脚本，�
    报头副标题、①②③④ 编号、题号、✕ 符号、配图位置。导入产出是「90 分初稿」，不是成品。
 2. 页数由内容决定。自动模式会试两种装栏尺度，通常能和手工排版的页数对齐
    （首期原稿：手工 3 页，导入也是 3 页）；仍差一页时可用「自动重排」或手动压缩。
-3. 解析依赖 `macOS 的 textutil`，且只在 `pnpm dev` / `pnpm preview` 下可用；
-   双击的单文件版没有 Node 侧，导入按钮会提示需要开发环境。
+3. 解析需要一个 Node 进程 + 一个系统转换器，**纯静态托管下用不了**。部署到服务器请看下一节。
+
+## 部署到服务器（为什么放上去以后 Word 不能导入）
+
+**Word 解析不是纯前端能力。** 页面点「Word」后走的是 `POST /@doc-import`，
+接收方在 Node 侧（`tools/import/server-plugin.mjs`），它会：
+
+1. 用系统转换器把 Word 转 HTML —— macOS `textutil` / LibreOffice `soffice` / Word COM / WPS COM
+2. 从 OLE 二进制里抽图落盘
+3. 过规则表 → 回一组元素给前端装箱
+
+所以**把 `dist/` 的静态文件扔到 nginx / OSS / Pages → 那个端点不存在 → 导入必然失败**。
+（这一层现在会在界面上说清楚：Word 按钮自动置灰，悬停显示怎么办。）
+
+### 正确姿势：用 Node 服务托管（已自带）
+
+```bash
+pnpm build
+pnpm serve:check                          # 先体检转换器在不在（不启动服务）
+pnpm serve --host 0.0.0.0 --port 8080     # 静态 dist + Word 解析都在这一个进程里
+```
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `--host` | `127.0.0.1` | 要局域网/公网访问再写 `0.0.0.0`（服务本身没有任何鉴权，登录/HTTPS 请交给 nginx 反代） |
+| `--port` | `5173` | 监听端口 |
+| `--dist` | `dist` | 静态目录 |
+| `--images-dir` | `var/imported` | 导入图片落盘位置。**别放 `dist/` 里**，重新构建会被覆盖；容器部署请挂持久卷 |
+| `--no-local` | 开 | 关掉 `/@local` 磁盘代读。对外监听时**必须关**，否则等于开放服务器任意图片读取 |
+
+### Linux 服务器要装一个转换器
+
+```bash
+apt install -y libreoffice-writer        # Debian / Ubuntu
+yum install -y libreoffice-writer        # CentOS / RHEL
+libreoffice --version                    # 有输出就是装好了
+```
+
+装完重启 `pnpm serve` 即可（不用重新 build）。macOS / Windows 桌面版走各自的转换链路，不用装。
+
+> `.doc`（Word 97-2003 二进制）只有转换器能读，浏览器里纯 JS 解不了；
+> `.docx` 理论可以前端解析，但这个项目的规则表依赖转换出来的 HTML 样式信号，`textutil`/LibreOffice 的
+> 输出更稳定。所以服务器方案才是正解。
 
 ## 核心排版能力
 
@@ -390,10 +431,17 @@ public/images/             # 默认配图（img1.png）
 
 ```bash
 pnpm typecheck
-pnpm smoke
+pnpm smoke        # Playwright 回归，47 项，约 100 秒
 pnpm mcp:selftest
 pnpm import:verify ~/Desktop/docs/地理时政周刊一.doc   # Word 导入回归
+node scripts/desktop-check.mjs                          # Electron 桌面版自检（起真窗口）
 ```
+
+**前置条件**：`pnpm smoke` / `import:verify` 会自己起 dev server（5173 被占用会直接复用），
+依赖 Playwright 缓存的 Chromium（`pnpm exec playwright-core install chromium` 一次即可）；
+`import:verify` 需要一份真实 .doc；`desktop-check` 需要先 `pnpm build`。
+失败先看 `artifacts/smoke/99-failure.png` 与控制台第一条 ✗；上一轮强杀留下的
+孤儿 dev server 会卡住用例（表现为 `waitForFunction` 超时），清掉 5173 再跑。
 
 `pnpm smoke` 覆盖：
 
