@@ -37,6 +37,7 @@ export function Group({
   children,
   defaultOpen = true,
   hint,
+  expandWhen,
 }: {
   id: string
   title: string
@@ -44,11 +45,21 @@ export function Group({
   defaultOpen?: boolean
   /** 标题右边的浅色补充说明，比如「可选」 */
   hint?: string
+  /**
+   * 条件成立时自动展开一次。
+   * 用于「选中的是表格 → 自动打开结构组」，不然新建表格后还得自己找折叠在哪。
+   * 条件变回 false 不会自动收起，免得正在编辑时面板突然折上。
+   */
+  expandWhen?: boolean
 }) {
   const [open, setOpen] = useState<boolean>(() => {
     const saved = readOpen()[id]
     return typeof saved === 'boolean' ? saved : defaultOpen
   })
+
+  useEffect(() => {
+    if (expandWhen) setOpen(true)
+  }, [expandWhen])
 
   const toggle = useCallback(() => {
     setOpen((v) => {

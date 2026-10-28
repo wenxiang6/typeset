@@ -35,7 +35,7 @@ import {
   screenshot,
   sleep,
   waitSettled,
-} from '../tools/browser-utils.mjs'
+} from '../backend/tools/browser-utils.mjs'
 
 const results = []
 const started = Date.now()
@@ -206,7 +206,8 @@ try {
     })
     assert(info.variant === 'footer', `添加的不是页脚：${JSON.stringify(info)}`)
     assert(info.title.includes('页脚'), `属性栏没有显示页脚：${info.title}`)
-    assert(Math.abs(info.y - (info.pageH - 60.5)) < 2, `页脚没有落在页底：${info.y}`)
+    // FOOTER_OFFSET 在 layout.ts 里是 45.4（下边距 12mm，页脚压在留白里）
+    assert(Math.abs(info.y - (info.pageH - 45.4)) < 2, `页脚没有落在页底：${info.y}`)
     assert(info.footerText.includes('尺幅千里'), '页脚内容为空')
     assertInvariants(await readState(page), '添加页脚后')
     await screenshot(page, '02l-footer.png')
@@ -234,7 +235,8 @@ try {
     })
     assert(info.variant === 'header', `添加的不是页眉：${JSON.stringify(info)}`)
     assert(info.title.includes('页眉'), `属性栏没有显示页眉：${info.title}`)
-    assert(Math.abs(info.y - 37.8) < 2, `页眉没有落在页顶：${info.y}`)
+    // HEADER_TOP = 30.2（layout.ts）
+    assert(Math.abs(info.y - 30.2) < 2, `页眉没有落在页顶：${info.y}`)
     assert(info.headerText.includes('地理时政周刊'), '页眉内容为空')
     assert(info.headers === 3, `页眉数量异常（应每页一个）：${info.headers}`)
     assertInvariants(await readState(page), '添加页眉后')
@@ -479,24 +481,41 @@ try {
     await resetEditor(page)
     await page.locator('[data-el-id="p0-5"]').click()
     await sleep(250)
-    const colors = page.locator('.ed-field', { hasText: '底色' }).locator('.ed-colors i')
-    await colors.nth(3).click()
+    // 新颜色控件：点色块 → 弹层里选预设（按 title 精确定位，不依赖顺序）
+    // compact 布局：.ed-fg-cell.ed-colorfield 里放标签 + 色块按钮
+    const bgField = page.locator('.ed-colorfield', { hasText: '底色' }).first()
+    await bgField.locator('.ed-color-trigger').click()
+    await sleep(200)
+    await page.locator('.ed-colorpop-dot[title="#666666"]').click()
     await sleep(350)
     const filled = await page.evaluate(() => {
       const n = document.querySelector('[data-el-id="p0-5"]')
       const child = n.querySelector('.note')
-      return { cls: n.className, elBg: getComputedStyle(n).backgroundColor, childBg: getComputedStyle(child).backgroundColor, active: document.querySelectorAll('.ed-field .ed-colors i.is-on').length }
+      return {
+        cls: n.className,
+        elBg: getComputedStyle(n).backgroundColor,
+        childBg: getComputedStyle(child).backgroundColor,
+      }
     })
     assert(filled.cls.includes('has-custom-bg'), '底色没有作用到组件')
     assert(filled.childBg === 'rgb(102, 102, 102)', `提示框内容表面没有变色：${filled.childBg}`)
-    assert(filled.active === 1, `色块没有选中态：${filled.active}`)
+    // 色块要显示当前颜色（限定在「底色」这一格，别拿到字色的空色块）
+    const chipColor = await bgField.locator('.ed-color-chip').evaluate((n) => getComputedStyle(n).backgroundColor)
+    assert(chipColor === 'rgb(102, 102, 102)', `色块没有显示当前颜色：${chipColor}`)
 
-    await colors.first().click()
+    // 透明
+    await bgField.locator('.ed-color-trigger').click()
+    await sleep(200)
+    await page.locator('.ed-colorpop button', { hasText: '透明' }).click()
     await sleep(300)
     const transparent = await page.evaluate(() => getComputedStyle(document.querySelector('[data-el-id="p0-5"] .note')).backgroundColor)
     assert(transparent === 'rgba(0, 0, 0, 0)', `透明底色没有生效：${transparent}`)
 
-    await page.locator('.ed-color-pick input').fill('#ffcc00')
+    // 自定义 HEX
+    await bgField.locator('.ed-color-trigger').click()
+    await sleep(200)
+    await page.locator('.ed-colorpop-hex').fill('#ffcc00')
+    await page.keyboard.press('Enter')
     await sleep(350)
     const custom = await page.evaluate(() => getComputedStyle(document.querySelector('[data-el-id="p0-5"] .note')).backgroundColor)
     assert(custom === 'rgb(255, 204, 0)', `自定义底色没有生效：${custom}`)
@@ -933,10 +952,10 @@ try {
     const setup = await page.evaluate(() => {
       const api = window.__paibanApi
       const d = api.doc
-      const contentW = d.w - 45.3 * 2
+      const contentW = d.w - 37.8 * 2
       const colW = (contentW - 14.1) / 2
       // 先放一个贴在左栏底部的图（addEl 会把尺寸夹进版心），再把高度撑到溢出
-      const id = api.addEl(0, { kind: 'image', variant: 'image', src: '', x: 45.3, y: 700, w: Math.round(colW), h: 100 })
+      const id = api.addEl(0, { kind: 'image', variant: 'image', src: '', x: 37.8, y: 700, w: Math.round(colW), h: 100 })
       api.updateEl(id, { h: 520 }, true)
       api.reflow()
       return { id }
@@ -959,9 +978,9 @@ try {
     const setup = await page.evaluate(() => {
       const api = window.__paibanApi
       const d = api.doc
-      const contentW = d.w - 45.3 * 2
+      const contentW = d.w - 37.8 * 2
       const colW = (contentW - 14.1) / 2
-      const x = 45.3 + colW + 14.1
+      const x = 37.8 + colW + 14.1
       const id = api.addEl(0, { kind: 'image', variant: 'image', src: '', x, y: 400, w: 200, h: 120 })
       return { id }
     })
@@ -1002,9 +1021,9 @@ try {
       const api = window.__paibanApi
       const d = api.getDoc()
       const pi = d.pages.length - 1
-      const contentW = d.w - 45.3 * 2
+      const contentW = d.w - 37.8 * 2
       const colW = (contentW - 14.1) / 2
-      const x = 45.3 + colW + 14.1
+      const x = 37.8 + colW + 14.1
       const id = api.addEl(pi, { kind: 'text', variant: 'paragraph', html: '<p>右栏文字切割测试</p>', x, y: 500, w: colW, h: 40 })
       return { id, pi }
     })
@@ -1486,7 +1505,7 @@ try {
       const api = window.__paibanApi
       const el = api.doc.pages[api.pageIdx].els.find((e) => e.kind === 'text' && !e.locked && !['header', 'masthead', 'footer'].includes(e.variant))
       api.setSelection(el.id)
-      return { id: el.id, w: el.w, docW: api.doc.w, margin: 45.3 }
+      return { id: el.id, w: el.w, docW: api.doc.w, margin: 37.8 }
     })
     const buttons = page.locator('.ed-align-row button')
     await buttons.nth(1).click() // 中（水平居中于版心）

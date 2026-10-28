@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { docImportPlugin } from './tools/import/server-plugin.mjs'
+import { docImportPlugin } from './backend/tools/import/server-plugin.mjs'
 
 /** ESM 里没有 __dirname，用它把相对路径钉成绝对路径 */
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
@@ -78,14 +78,18 @@ function localImages(): Plugin {
 export default defineConfig({
   // 相对资源路径：dist 既能放到任意子目录，也便于构建后内联成单文件
   base: './',
+  // 前端源码全部在 frontend/；构建产物仍落在根 dist/（服务器托管的就是它）
+  root: here('frontend'),
   plugins: [react(), localImages(), docImportPlugin()],
   build: {
+    outDir: here('dist'),
+    emptyOutDir: true,
     rollupOptions: {
       input: {
         // 编辑器主界面
-        main: here('index.html'),
+        main: here('frontend/index.html'),
         // 服务器端自动装配页（部署后由无头 Chromium 打开，不给人看）
-        format: here('format.html'),
+        format: here('frontend/format.html'),
       },
     },
   },

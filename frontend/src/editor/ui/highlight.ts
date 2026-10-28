@@ -191,17 +191,27 @@ function trimAscii(s: string) {
 }
 
 /** 起止标签之间的内容是否全是行内/文本（决定能否塞进同一行） */
-function isInlineOnly(el: Element): boolean {
+/**
+ * 能不能整段塞进一行？
+ *
+ * 规则：子元素全是行内、而且最多只有一个 —— 才内联。
+ * `<div class="trap"><span>x</span><span>正文</span></div>` 有两个 span，
+ * 虽然都是行内，但它们是「并列的两块内容」，必须各占一行才看得出结构；
+ * 反过来 `<p><span class="ans">答案：</span>后面一长串正文</p>` 只有一个 span，
+ * 拆开反而把一句话拦腰截断。
+ *
+ * @returns 行内子元素个数；含块级元素时返回 -1（必须拆行）
+ */
+function inlineChildCount(el: Element): number {
+  let n = 0
   for (const child of Array.from(el.childNodes)) {
-    // 文字不影响：`<p>一句话</p>` 就该排成一行，别拆成开标签/正文/闭标签三行
-    if (child.nodeType === Node.TEXT_NODE) continue
     if (child.nodeType !== Node.ELEMENT_NODE) continue
     const tag = (child as Element).tagName.toLowerCase()
-    if (!INLINE_TAGS.has(tag)) return false
-    // 行内元素里嵌套块级（少见）也算不可内联
-    if (!isInlineOnly(child as Element)) return false
+    if (!INLINE_TAGS.has(tag)) return -1
+    if (inlineChildCount(child as Element) < 0) return -1
+    n += 1
   }
-  return true
+  return n
 }
 
 function attrs(el: Element): string {
@@ -282,8 +292,10 @@ export function formatHtml(html: string): string {
       lines.push(pad(depth) + inlineHtml(el))
       return
     }
-    // 纯文字块（如 <p>一句话</p>）：标签和文字同一行，更像人写的
-    if (isInlineOnly(el)) {
+    // 最多一个行内子元素：标签和文字同一行，更像人写的；
+    // 多个并列的行内元素（div 里两三段 span）则交给下面逐行展开
+    const inlineN = inlineChildCount(el)
+    if (inlineN >= 0 && inlineN <= 1) {
       const inner = trimAscii(Array.from(el.childNodes).map(inlineHtml).join(''))
       if (!inner) lines.push(pad(depth) + `${open}</${tag}>`)
       else lines.push(pad(depth) + `${open}${inner}</${tag}>`)

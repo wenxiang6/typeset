@@ -388,7 +388,13 @@ export function Inspector({ api }: { api: EditorApi }) {
           <span className="ed-hint">{multiIds.length > 1 ? '按阅读顺序拼进第一块' : 'Cmd/Ctrl 点选多块可一次合并'}</span>
         </Row>
 
-        <Group id="structure" title="结构" defaultOpen={false} hint="内部元素 / 链 / 列表 / 表格 / 图层">
+        <Group
+          id="structure"
+          title="结构"
+          defaultOpen={false}
+          hint="内部元素 / 链 / 列表 / 表格 / 图层"
+          expandWhen={!!tableModel || !!listModel || !!chainModel || subParts.length >= 2}
+        >
         {subParts.length >= 2 && sel.variant !== 'ulist' && sel.variant !== 'olist' && sel.variant !== 'chain' && (
           <>
             <div className="ed-panel-title">内部元素</div>
@@ -696,7 +702,12 @@ export function Inspector({ api }: { api: EditorApi }) {
         </div>
         </Group>
 
-        <Group id="media" title="图片 / 二维码 / 区域" defaultOpen={false}>
+        <Group
+          id="media"
+          title="图片 / 二维码 / 区域"
+          defaultOpen={false}
+          expandWhen={sel.kind === 'image' || sel.kind === 'region' || sel.variant === 'qr'}
+        >
         {sel.kind === 'image' && (
           <>
             <label className="ed-field">

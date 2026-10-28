@@ -11,7 +11,8 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// 本文件在 backend/tools/ 下，仓库根要往上两级（artifacts、node_modules、dist 都在根）
+export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 /**
  * 编辑器地址。本机开发常用 5174（5173 上可能还挂着别的东西），
  * 所以不写死端口：先用环境变量 PAIBAN_URL，否则依次探 5174 → 5173，都没起才自己拉一个。

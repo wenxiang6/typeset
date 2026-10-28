@@ -22,7 +22,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { startServer } from '../electron/server.mjs'
-import { converterReport } from '../tools/import/parse.mjs'
+import { converterReport } from '../backend/tools/import/parse.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 

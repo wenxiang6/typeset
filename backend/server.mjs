@@ -14,11 +14,12 @@ import { createServer } from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createPersistApi } from './electron/persist-api.mjs'
-import { createFormatApi } from './electron/format-api.mjs'
+import { createPersistApi } from './api/persist-api.mjs'
+import { createFormatApi } from './api/format-api.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DIST = path.join(__dirname, 'dist')
+// 构建产物在仓库根 dist/，本文件在 backend/ 下
+const DIST = path.join(__dirname, '..', 'dist')
 const PORT = Number(process.env.PORT || 80)
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'paiban.db')
 

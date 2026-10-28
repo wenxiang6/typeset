@@ -11,7 +11,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { handleImport, serveImage } from '../tools/import/server-plugin.mjs'
+import { handleImport, serveImage } from '../backend/tools/import/server-plugin.mjs'
 import { createPersistApi } from './persist-api.mjs'
 
 const MIME = {

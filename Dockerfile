@@ -32,16 +32,11 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
     && apk add --no-cache libreoffice-writer font-noto-cjk chromium nss freetype harfbuzz ttf-freefont
 
 COPY --from=builder /app/dist /app/dist
-COPY server.mjs /app/server.mjs
-COPY electron/persist-api.mjs /app/electron/persist-api.mjs
-COPY electron/format-api.mjs /app/electron/format-api.mjs
-# 排版规则与解析器：/api/format 在服务器上跑，必须一起进镜像
-COPY tools/import /app/tools/import
-# 语义 JSON 排版（/api/elements）：纯 Node 计算，不需要 chromium
-COPY tools/layout /app/tools/layout
+# 后端整目录：入口 server.mjs、API（api/）、解析与排版引擎（tools/）
+COPY backend /app/backend
 
 # SQLite 数据落卷：升级/重建镜像不丢数据
 VOLUME /data
 EXPOSE 80
 
-CMD ["node", "server.mjs"]
+CMD ["node", "backend/server.mjs"]

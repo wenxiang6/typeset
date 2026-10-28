@@ -9,3 +9,7 @@ build
 *.tar.gz
 *.db
 .git
+var
+docs
+*.doc
+design-spec.html

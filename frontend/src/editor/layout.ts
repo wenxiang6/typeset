@@ -465,6 +465,21 @@ export function swapWithNeighbor(doc: Doc, pageIdx: number, id: string, dir: Swa
     other.x = nox
     cur.x = nx
   }
+  /*
+   * 换到另一栏后，当前块还是原来的 y、可能比目标栏下一块高出一截。
+   * 只交换坐标不做压实的话，会压住下一块（实测压 1px，肉眼看不出来但排版验不过）。
+   * 这里只把目标栏里被压到的块依次往下让，不动其它栏。
+   */
+  const g2 = getGeometry(doc, pageIdx)
+  const col = columnOf(g2, cur)
+  const below = page.els
+    .filter((e) => e.id !== cur.id && isFlowable(e) && columnOf(g2, e) === col && e.y >= cur.y - 0.5)
+    .sort((a, b) => a.y - b.y)
+  let cursor = cur.y + cur.h + PAGE_GAP
+  for (const e of below) {
+    if (e.y < cursor - 0.5) e.y = Math.round(cursor * 10) / 10
+    cursor = Math.max(cursor, e.y + e.h + PAGE_GAP)
+  }
   return other.id
 }
 
