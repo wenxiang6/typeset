@@ -19,17 +19,15 @@ RUN pnpm build:http
 
 # ---------- 运行阶段 ----------
 # Node 后端一体：静态托管 + node:sqlite 持久化（零 npm 依赖）
+#
+# 刻意不装 chromium / libreoffice / 字体：
+# - 排版走纯 Node（backend/tools/layout：高度估算误差 0.7%），浏览器只服务
+#   /api/format 的精确装配——那条路在服务器上直接 501 指路（用 /api/elements）。
+# - 镜像因此从 ~1GB 降到 ~200MB，构建从 3~6 分钟降到 1 分钟内。
 FROM node:22-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production PORT=80 DB_PATH=/data/paiban.db
-
-# LibreOffice Writer：Word 导入转换用（parse.mjs 调 soffice 转 HTML）
-# font-noto-cjk：中文字体，保证文档转出来中文不缺字
-# chromium：服务器端自动排版用无头浏览器装配版面（客户端就什么环境都不用装）
-# apk 源换成阿里云镜像，国内构建快很多
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && apk add --no-cache libreoffice-writer font-noto-cjk chromium nss freetype harfbuzz ttf-freefont
 
 COPY --from=builder /app/dist /app/dist
 # 后端整目录：入口 server.mjs、API（api/）、解析与排版引擎（tools/）

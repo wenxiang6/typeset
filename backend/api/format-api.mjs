@@ -13,6 +13,10 @@
  *
  * 为什么必须起浏览器：装配要按栏宽量真实高度（分栏 / 避让 / 溢出翻页 / 按行切割），
  * 脱离 DOM 算不出坐标。所以服务器跑一次无头 Chromium，把结果回传落库。
+ *
+ * 部署形态（2026-10-28 起）：服务器镜像刻意不装浏览器，本文件里只有 /api/format 需要
+ * Chromium——没装就在入口直接 501 指路（用 /api/elements，纯 Node）。
+ * /api/elements 与 /api/layout/validate 完全不碰浏览器。
  */
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -58,6 +62,8 @@ function readBody(req, limit = MAX_BYTES) {
 
 /** 找系统里的 Chromium：优先环境变量，其次各发行版常见路径 */
 async function findChromium() {
+  // 测试开关：模拟「服务器没装浏览器」的部署形态
+  if (process.env.PAIBAN_NO_BROWSER === '1') return null
   const cand = [
     process.env.CHROMIUM_PATH,
     '/usr/bin/chromium',
@@ -157,7 +163,7 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
   /** 起一次无头浏览器，让它打开装配页并回传结果 */
   async function runBrowser(jobId, orientation) {
     const exe = chromiumPath ?? (chromiumPath = await findChromium())
-    if (!exe) throw new Error('服务器没装 Chromium（apk add chromium / apt install chromium）')
+    if (!exe) throw new Error('没找到 Chromium（可设 CHROMIUM_PATH 指定路径；服务器部署形态走 /api/elements，不需要浏览器）')
 
     const url = `http://127.0.0.1:${port}/format.html?job=${encodeURIComponent(jobId)}&orientation=${orientation}`
     const profile = path.join(os.tmpdir(), `paiban-prof-${jobId}`)
@@ -324,6 +330,17 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
 
       /* ---- 上传并排版 ---- */
       if (pathname === '/api/format' && req.method === 'POST') {
+        // 这条路线要起无头浏览器量高度。服务器镜像默认不装浏览器（见 Dockerfile），
+        // 没有就明确拒绝并指路，别让用户等 90 秒超时。
+        const exe = chromiumPath ?? (chromiumPath = await findChromium())
+        if (!exe) {
+          json(res, 501, {
+            ok: false,
+            error: '此部署未装 Chromium，原稿直传（/api/format）不可用',
+            hint: '推荐：POST /api/elements（语义 JSON，纯 Node 排版，无需浏览器）；或在装有浏览器的机器上排版后 PUT /api/doc?push=1',
+          })
+          return true
+        }
         const buf = await readBody(req)
         if (!buf.length) {
           json(res, 400, { error: '空文件' })
