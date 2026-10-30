@@ -260,20 +260,36 @@ function CredentialModal({ credential, onClose }: { credential: Credential | nul
         // 管理员发号：一键复制可直接转发给用户的全套说明
         const text = [
           '【地理时政周刊 · 账号开通】',
+          '',
+          '你的专属账号：',
           `名字：${credential.name}`,
           `密钥：${credential.secret}`,
           '',
-          '使用方法（二选一）：',
-          '1. 在你的 AI 工具里装好「paiban-word-to-json」技能（安装地址：https://gitee.com/gong-wenxiang/muban_skill ），把上面的名字和密钥发给 AI，说「用这个凭证把周刊推送给我」；',
-          '2. 或直接在浏览器打开下面的链接，查看/微调你的版面：',
-          credential.viewerUrl,
+          '━━ 怎么用 ━━',
           '',
-          '注意：密钥只此一份，请勿外传。',
+          '■ 第一步：看刊物（不用装任何东西）',
+          '用浏览器（手机、电脑都行）打开下面这个链接，就能看到你的版面：',
+          credential.viewerUrl,
+          '※ 这个链接就是你的「通行证」，只能自己用，别发给别人。',
+          '',
+          '■ 第二步：修改版面（可选）',
+          '打开的页面就是排版编辑器：改文字、换图片、调版式都可以，',
+          '改完自动保存；点右上角「打印/导出 PDF」可以直接出 PDF 文件。',
+          '',
+          '■ 第三步：让 AI 帮你排版（进阶，可选）',
+          '在你的 AI 工具里装好「paiban-word-to-json」技能：',
+          '把 https://gitee.com/gong-wenxiang/muban_skill 发给 AI，说「帮我安装这个技能」，',
+          '装好后把最上面的名字和密钥发给 AI，说「用这个凭证把周刊推送给我」，',
+          'AI 会自动完成验证和排版，并把你的版面链接发回来。',
+          '',
+          '■ 注意',
+          '· 名字 + 密钥就是你的全部身份，只发给你自己的 AI，别发给第二个人；',
+          '· 密钥忘了或泄露了，找管理员（宫大人）重置一个。',
         ].join('\n')
         navigator.clipboard?.writeText(text)
-        message.success('全部内容已复制，直接粘贴发给对方即可')
+        message.success('使用说明已复制，直接粘贴发给对方即可')
       }}>
-        复制全部内容（名字 + 密钥 + 链接）
+        复制全部内容（名字 + 密钥 + 使用说明）
       </Button>
     </Modal>
   )
