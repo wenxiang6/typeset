@@ -264,7 +264,7 @@ function CredentialModal({ credential, onClose }: { credential: Credential | nul
           `密钥：${credential.secret}`,
           '',
           '使用方法（二选一）：',
-          '1. 在你的 AI 工具里装好「paiban-word-to-json」技能，把上面的名字和密钥发给 AI，说「用这个凭证把周刊推送给我」；',
+          '1. 在你的 AI 工具里装好「paiban-word-to-json」技能（安装地址：https://gitee.com/gong-wenxiang/muban_skill ），把上面的名字和密钥发给 AI，说「用这个凭证把周刊推送给我」；',
           '2. 或直接在浏览器打开下面的链接，查看/微调你的版面：',
           credential.viewerUrl,
           '',
