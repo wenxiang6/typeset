@@ -1,7 +1,7 @@
-"""管理后台：/admin 单页（服务端渲染，零前端依赖）。
+"""管理后台后端：/api/admin/* JSON 接口（React antd 后台用）+ /admin-legacy 无 JS 兜底页。
 
-- 权限：ADMIN_SECRET 环境变量；登录后发 HttpOnly HMAC cookie（7 天）
-- 功能：用户列表 / 新增（自动生成 secret，凭证只展示一次）/ 删除 / 重置 secret
+- 权限：ADMIN_SECRET 环境变量；登录后发 HttpOnly HMAC cookie（7 天），登录限速防爆破
+- React 后台（frontend/src/admin）走 JSON 接口；/admin 路径由 SPA 接管
 - 不做：日志审计、角色权限、后台改稿（单人后台，明确拒绝过度设计）
 """
 
@@ -337,13 +337,13 @@ async def admin_reset_user_json(request: Request, name: str):
     }
 
 
-@router.get("/admin")
+@router.get("/admin-legacy")
 async def admin_home(request: Request):
     if not _admin_ok(request):
         return _page(
             "排版管理 · 登录",
             "<h2>排版管理后台</h2><p>请输入管理员密钥（ADMIN_SECRET）。</p>"
-            '<form method=post action=/admin/login><input type=password name=password autofocus> '
+            '<form method=post action=/admin-legacy/login><input type=password name=password autofocus> '
             '<button>登录</button></form>',
         )
 
@@ -365,9 +365,9 @@ async def admin_home(request: Request):
             f"<tr><td>{html.escape(u.name)}</td><td>{active}</td>"
             f"<td>{size}</td><td>{snap_counts.get(u.id, 0)}</td>"
             f"<td>{time.strftime('%Y-%m-%d', time.localtime((u.created_at or 0) / 1000)) if u.created_at else '—'}</td>"
-            f"<td><form method=post action=/admin/users/reset onsubmit=\"return confirm('重置 {html.escape(u.name)} 的密钥？')\">"
+            f"<td><form method=post action=/admin-legacy/users/reset onsubmit=\"return confirm('重置 {html.escape(u.name)} 的密钥？')\">"
             f'<input type=hidden name=name value="{html.escape(u.name)}"><button>重置密钥</button></form> '
-            f"<form method=post action=/admin/users/delete onsubmit=\"return confirm('删除 {html.escape(u.name)} 及其全部稿件？不可恢复！')\">"
+            f"<form method=post action=/admin-legacy/users/delete onsubmit=\"return confirm('删除 {html.escape(u.name)} 及其全部稿件？不可恢复！')\">"
             f'<input type=hidden name=name value="{html.escape(u.name)}"><button class=warn>删除</button></form></td></tr>'
         )
 
@@ -376,31 +376,31 @@ async def admin_home(request: Request):
         "<table><tr><th>名字</th><th>最后活跃</th><th>稿件大小</th><th>快照数</th><th>创建时间</th><th>操作</th></tr>"
         + ("".join(rows) or '<tr><td colspan=6>还没有用户，先新增一个</td></tr>')
         + "</table>"
-        '<h3>新增用户</h3><form method=post action=/admin/users/add>'
+        '<h3>新增用户</h3><form method=post action=/admin-legacy/users/add>'
         '名字：<input name=name required> <button>创建（secret 自动生成）</button></form>'
-        '<p style="margin-top:24px"><form method=post action=/admin/logout><button>退出登录</button></form></p>'
+        '<p style="margin-top:24px"><form method=post action=/admin-legacy/logout><button>退出登录</button></form></p>'
     )
     return _page("排版管理", body)
 
 
-@router.post("/admin/login")
+@router.post("/admin-legacy/login")
 async def admin_login(request: Request):
     form = await request.form()
     password = str(form.get("password") or "")
     locked = _login_blocked(request)
     if locked:
-        return _page("尝试过多", f"<h2>失败次数过多</h2><p>约 {locked // 60 + 1} 分钟后再试。<a href=/admin>返回</a></p>")
+        return _page("尝试过多", f"<h2>失败次数过多</h2><p>约 {locked // 60 + 1} 分钟后再试。<a href=/admin-legacy>返回</a></p>")
     if not _check_password(request, password):
-        return _page("登录失败", '<h2>密钥不对</h2><p><a href=/admin>返回重试</a></p>')
+        return _page("登录失败", '<h2>密钥不对</h2><p><a href=/admin-legacy>返回重试</a></p>')
     exp = int(time.time()) + TTL
-    resp = RedirectResponse("/admin", status_code=303)
+    resp = RedirectResponse("/admin-legacy", status_code=303)
     resp.set_cookie(COOKIE, f"{exp}.{_sign(str(exp))}", max_age=TTL, httponly=True, samesite="lax")
     return resp
 
 
-@router.post("/admin/logout")
+@router.post("/admin-legacy/logout")
 async def admin_logout():
-    resp = RedirectResponse("/admin", status_code=303)
+    resp = RedirectResponse("/admin-legacy", status_code=303)
     resp.delete_cookie(COOKIE)
     return resp
 
@@ -420,23 +420,23 @@ def _cred_block(name: str, secret: str) -> str:
     )
 
 
-@router.post("/admin/users/add")
+@router.post("/admin-legacy/users/add")
 async def admin_add_user(request: Request):
     try:
         await _require_admin(request)
     except PermissionError:
-        return _page("未登录", '<p>请先<a href=/admin>登录</a>。</p>')
+        return _page("未登录", '<p>请先<a href=/admin-legacy>登录</a>。</p>')
     form = await request.form()
     name = str(form.get("name") or "").strip()
     if not name:
-        return _page("出错", "<p>名字不能为空。<a href=/admin>返回</a></p>")
+        return _page("出错", "<p>名字不能为空。<a href=/admin-legacy>返回</a></p>")
     secret = secrets.token_hex(16)
     async with SessionLocal() as s:
         exists = (
             await s.execute(select(User).where(User.name == name))
         ).scalar_one_or_none()
         if exists:
-            return _page("出错", f"<p>名字 <b>{html.escape(name)}</b> 已存在。<a href=/admin>返回</a></p>")
+            return _page("出错", f"<p>名字 <b>{html.escape(name)}</b> 已存在。<a href=/admin-legacy>返回</a></p>")
         s.add(User(name=name, secret=secret, created_at=int(time.time() * 1000)))
         await s.commit()
     _, q = credential_for(name, secret)
@@ -445,16 +445,16 @@ async def admin_add_user(request: Request):
         f"<h2>已创建用户：{html.escape(name)}</h2>"
         + _cred_block(name, secret)
         + "<p>同时把 name/secret 抄进本地 skill 的 config.json（users 数组），推送才能选到这个人。</p>"
-        '<p><a href=/admin>返回列表</a></p>',
+        '<p><a href=/admin-legacy>返回列表</a></p>',
     )
 
 
-@router.post("/admin/users/delete")
+@router.post("/admin-legacy/users/delete")
 async def admin_delete_user(request: Request):
     try:
         await _require_admin(request)
     except PermissionError:
-        return _page("未登录", '<p>请先<a href=/admin>登录</a>。</p>')
+        return _page("未登录", '<p>请先<a href=/admin-legacy>登录</a>。</p>')
     form = await request.form()
     name = str(form.get("name") or "")
     async with SessionLocal() as s:
@@ -462,26 +462,26 @@ async def admin_delete_user(request: Request):
         if row:
             await s.delete(row)  # CASCADE 清掉 docs/snapshots/templates
             await s.commit()
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin-legacy", status_code=303)
 
 
-@router.post("/admin/users/reset")
+@router.post("/admin-legacy/users/reset")
 async def admin_reset_user(request: Request):
     try:
         await _require_admin(request)
     except PermissionError:
-        return _page("未登录", '<p>请先<a href=/admin>登录</a>。</p>')
+        return _page("未登录", '<p>请先<a href=/admin-legacy>登录</a>。</p>')
     form = await request.form()
     name = str(form.get("name") or "")
     secret = secrets.token_hex(16)
     async with SessionLocal() as s:
         row = (await s.execute(select(User).where(User.name == name))).scalar_one_or_none()
         if not row:
-            return _page("出错", "<p>用户不存在。<a href=/admin>返回</a></p>")
+            return _page("出错", "<p>用户不存在。<a href=/admin-legacy>返回</a></p>")
         row.secret = secret
         await s.commit()
     return _page(
         "密钥已重置",
         f"<h2>已重置：{html.escape(name)}</h2>" + _cred_block(name, secret)
-        + "<p style=class=warn>旧链接全部失效。记得同步更新 config.json。</p><p><a href=/admin>返回列表</a></p>",
+        + "<p style=class=warn>旧链接全部失效。记得同步更新 config.json。</p><p><a href=/admin-legacy>返回列表</a></p>",
     )

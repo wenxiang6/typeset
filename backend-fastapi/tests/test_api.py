@@ -177,18 +177,18 @@ async def test_validate_is_public(monkeypatch):
 async def test_admin_flow():
     async with client() as c:
         # 未登录看不到用户列表
-        r = await c.get("/admin")
+        r = await c.get("/admin-legacy")
         assert "管理员密钥" in r.text and "测试用户" not in r.text
         # 错误密钥进不去
-        r = await c.post("/admin/login", data={"password": "nope"}, follow_redirects=False)
+        r = await c.post("/admin-legacy/login", data={"password": "nope"}, follow_redirects=False)
         assert "密钥不对" in r.text
         # 正确密钥 → cookie → 列表可见
-        r = await c.post("/admin/login", data={"password": "admin-test-secret"}, follow_redirects=False)
+        r = await c.post("/admin-legacy/login", data={"password": "admin-test-secret"}, follow_redirects=False)
         assert r.status_code == 303
-        page = (await c.get("/admin")).text
+        page = (await c.get("/admin-legacy")).text
         assert NAME in page
         # 新增用户：返回一次性凭证
-        r = await c.post("/admin/users/add", data={"name": "李四"})
+        r = await c.post("/admin-legacy/users/add", data={"name": "李四"})
         assert "只展示这一次" in r.text and "李四" in r.text
         # 新用户的凭证直接可用
         import re
@@ -196,8 +196,16 @@ async def test_admin_flow():
         k2 = md5_hex(f"李四:{m.group(1)}")
         assert (await c.get("/api/doc", params={"u": "李四", "k": k2})).status_code == 200
         # 删除用户 → 凭证立即失效（级联清数据）
-        await c.post("/admin/users/delete", data={"name": "李四"})
+        await c.post("/admin-legacy/users/delete", data={"name": "李四"})
         assert (await c.get("/api/doc", params={"u": "李四", "k": k2})).status_code == 401
+
+
+async def test_admin_spa_route_serves_frontend():
+    """/admin 必须返回 SPA（React 后台），而不是后端渲染的 HTML 页。"""
+    async with client() as c:
+        r = await c.get("/admin")
+        # dist 不在测试环境里时返回 404 JSON；关键是不能出现后端 HTML 的特征
+        assert "管理员密钥" not in r.text
 
 
 async def test_admin_json_api():
