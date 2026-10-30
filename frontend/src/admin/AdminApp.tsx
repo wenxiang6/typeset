@@ -257,10 +257,23 @@ function CredentialModal({ credential, onClose }: { credential: Credential | nul
         {credential.viewerUrl}
       </Text>
       <Button type="primary" block style={{ marginTop: 16 }} onClick={() => {
-        navigator.clipboard?.writeText(credential.viewerUrl)
-        message.success('链接已复制')
+        // 管理员发号：一键复制可直接转发给用户的全套说明
+        const text = [
+          '【地理时政周刊 · 账号开通】',
+          `名字：${credential.name}`,
+          `密钥：${credential.secret}`,
+          '',
+          '使用方法（二选一）：',
+          '1. 在 WorkBuddy 里安装「paiban-word-to-json」技能后，把上面名字和密钥发给 AI，说「用这个凭证把周刊推送给我」；',
+          '2. 或直接在浏览器打开下面的链接，查看/微调你的版面：',
+          credential.viewerUrl,
+          '',
+          '注意：密钥只此一份，请勿外传。',
+        ].join('\n')
+        navigator.clipboard?.writeText(text)
+        message.success('全部内容已复制，直接粘贴发给对方即可')
       }}>
-        复制访问链接
+        复制全部内容（名字 + 密钥 + 链接）
       </Button>
     </Modal>
   )
