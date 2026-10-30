@@ -1,5 +1,6 @@
 # Caddy 反向代理：自动 HTTPS（Let's Encrypt），证书申请续期全自动。
 # 三个域名都指向本服务器，一并收编；.env 里 BASE_URL 用 https://paiban.web3cart8.com
 paiban.web3cart8.com, web3cart8.com, www.web3cart8.com {
+	encode zstd gzip
 	reverse_proxy api:80
 }

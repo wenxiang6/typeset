@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import delete, select
 
@@ -28,6 +29,8 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="paiban-api", docs_url=None, redoc_url=None, lifespan=_lifespan)
+# 跨国链路裸传 1.3MB JS 要 20s+；gzip 后 ~300KB。JS/JSON 压缩比高，图片不重复压（sharp 已转 webp）
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
 app.include_router(admin_router)
 
 
