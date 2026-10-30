@@ -271,7 +271,7 @@ export function createFormatApi({ persist = null, distDir, port, log = () => {},
         const ori = url.searchParams.get('orientation')
         if (ori === 'portrait' || ori === 'landscape') layout.orientation = ori
 
-        const imgWarnings = saveInlineImages(layout)
+        const imgWarnings = await saveInlineImages(layout)
         const { doc, report } = buildDoc(layout)
         const push = url.searchParams.get('push') !== '0'
         const raw = JSON.stringify(doc)
