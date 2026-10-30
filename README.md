@@ -1,72 +1,43 @@
-# 地理时政周刊 · 排版编辑器
+# 地理时政周刊 · 排版编辑器（服务器版）
 
 React 19 + Vite + TypeScript 的报纸/周刊排版工具。默认入口是**可视化排版编辑器**，
 支持双栏 A4 横版/竖版、53 种可搜索组件、拖动避让、文字自动增高、跨页按行切割、
 溢出自动翻页、全屏背景图、本地图片和打印/导出 PDF。
 
+架构：**FastAPI 网关**（鉴权/按用户存储/托管网页/admin）+ **Node 排版引擎**（内部计算服务）
++ **PostgreSQL**。多用户按 `md5(name:secret)` 凭证隔离，部署见 [`DEPLOY-API.md`](DEPLOY-API.md)。
+
+```
+paiban/
+├── frontend/            # React 编辑器（package.json / vite.config 都在这）
+│   └── scripts/         # smoke 回归、serve 本地静态服务
+├── backend/             # Node 排版引擎 + Word 导入 + MCP
+│   └── compute-server.mjs  # 容器内计算服务入口（只算不存）
+├── backend-fastapi/     # FastAPI 网关（app/ + tests/ + migrate 脚本）
+├── dist/                # 构建产物（api 托管 / compute 共用）
+├── docker-compose.yml   # 三容器编排（postgres + compute + api）
+└── DEPLOY-API.md        # 部署文档
+```
+
+前端命令都在 `frontend/` 下执行：
+
 ```bash
+cd frontend
 pnpm install
 pnpm dev          # http://127.0.0.1:5173
-pnpm build        # 生成可直接双击的单文件版
+pnpm build        # 产物输出到仓库根 dist/
 pnpm typecheck
 pnpm smoke        # Playwright 回归（38 项）
 pnpm mcp          # 项目 MCP（stdio）
 ```
 
-## 打包成桌面应用（macOS / Windows）
-
-打包用的是 Electron：主进程在 `127.0.0.1` 的随机端口起一个**只跑本机**的小服务
-（静态 dist + `/@doc-import` + `/@imported` + `/@local`），窗口加载这个地址。
-所以桌面版和 `pnpm dev` 走的是同一套代码，Word 解析、图片读写全在本机，不联网。
-
-```bash
-pnpm app                 # 直接在本机跑（先 pnpm build）
-pnpm desktop:check       # 自动化体检：起窗口 → 导入 Word → 开打印预览 → 截图
-pnpm dist:mac            # 出 dmg（arm64 + x64 两个）
-pnpm dist:mac:arm        # 只出 Apple Silicon 的 dmg
-pnpm dist:win:portable   # 出 Windows 免安装 zip（macOS 上也能打，不需要 Wine）
-pnpm dist:win            # 出 Windows 安装版 exe（electron-builder --win，需要 Windows 或 Wine）
-```
-
-产物都在 `release/`：
-
-| 文件 | 说明 |
-| --- | --- |
-| `地理周刊排版-<版本>-mac-arm64.dmg` | Apple Silicon（M 系列）Mac，双击挂载拖进「应用程序」 |
-| `地理周刊排版-<版本>-mac-x64.dmg` | Intel Mac |
-| `地理周刊排版-<版本>-win-x64-portable.zip` | Windows 免安装：解压后双击 `地理周刊排版.exe` |
-
-几个必须知道的点：
-
-- **没有开发者证书时是 ad-hoc 签名**（`scripts/sign-adhoc.cjs` 在 afterPack 里做）。
-  本机能跑，但把 dmg 发到别的 Mac，首次打开要「右键 → 打开」，
-  或者让对方执行 `xattr -dr com.apple.quarantine /Applications/地理周刊排版.app`。
-  要彻底不报警需要 Apple 开发者 ID 证书 + 公证。
-- **Windows 免安装包**是把官方 Electron 运行时和 `resources/app` 拼起来的，
-  没有改 exe 图标/版本信息（那一步要 Wine）。想要带图标、带开始菜单的正式安装包，
-  在 Windows 机器上跑 `pnpm dist:win`。
-- **Windows 上导入 Word 需要本机有 Word / WPS / LibreOffice**：
-  `tools/import/parse.mjs` 会按 `soffice → Word COM → WPS COM` 的顺序试着把
-  `.doc/.docx` 转成 HTML（macOS 仍优先用系统自带 `textutil`，零依赖）。
-  三个都没有时会返回明确的错误提示，让用户另存为 `.docx`。
-- 存档（localStorage）、导入的图片放在 `userData`：
-  macOS `~/Library/Application Support/地理周刊排版/`，Windows `%APPDATA%\地理周刊排版\`。
-  菜单「帮助 → 打开存档目录」可以直接跳过去。
-- 打包时如果 Electron 下载慢，设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`
-  并给 electron-builder 指一个项目目录**之外**的缓存：
-  `ELECTRON_BUILDER_CACHE=/tmp/eb`（放在项目里会因为它自己的 `.js` 被 `"type":"module"` 当成 ESM 而报错）。
-
-## 打开方式（白屏问题已修复）
+## 打开方式
 
 | 方式 | 说明 |
 | --- | --- |
+| 服务器链接（`?u=&k=`） | 正式用法：FastAPI 托管 dist/，见 `DEPLOY-API.md` |
 | `pnpm dev` → `http://127.0.0.1:5173` | 开发模式，支持本地图片 `/@local` 代理 |
-| 双击 `dist/地理周刊-排版编辑器.html` | 单文件 HTML：CSS/JS 全部内联；图片从同目录 `images/` 读取 |
 | `pnpm preview` | 预览构建产物，同样支持本地图片代理 |
-
-> 以前直接打开 `dist/index.html` 会白屏：Vite 默认用 `/assets/...` 绝对路径，
-> 在 `file://` 下被浏览器 CORS 拦截。现在 `pnpm build` 会自动把 CSS/JS 内联成单文件 HTML（`dist/images/` 需与 HTML 同级保留）。
-> 另外加了全局错误兜底：坏存档/运行期异常会显示恢复面板，而不是白屏。
 
 ## 导入 Word 原稿（本机解析）
 
@@ -145,22 +116,15 @@ pnpm import:verify <doc> --portrait                       # 同一个脚本，�
    （首期原稿：手工 3 页，导入也是 3 页）；仍差一页时可用「自动重排」或手动压缩。
 3. 解析需要一个 Node 进程 + 一个系统转换器，**纯静态托管下用不了**。部署到服务器请看下一节。
 
-## 部署到服务器（为什么放上去以后 Word 不能导入）
+## 部署到服务器
 
-**Word 解析不是纯前端能力。** 页面点「Word」后走的是 `POST /@doc-import`，
-接收方在 Node 侧（`tools/import/server-plugin.mjs`），它会：
+正式部署 = Docker 三容器（PostgreSQL + Node 计算服务 + FastAPI 网关），
+完整步骤、老数据迁移、备份见 [`DEPLOY-API.md`](DEPLOY-API.md)。
 
-1. 用系统转换器把 Word 转 HTML —— macOS `textutil` / LibreOffice `soffice` / Word COM / WPS COM
-2. 从 OLE 二进制里抽图落盘
-3. 过规则表 → 回一组元素给前端装箱
-
-所以**把 `dist/` 的静态文件扔到 nginx / OSS / Pages → 那个端点不存在 → 导入必然失败**。
-（这一层现在会在界面上说清楚：Word 按钮自动置灰，悬停显示怎么办。）
-
-### 正确姿势：用 Node 服务托管（已自带）
+下面的 `pnpm serve` 是**本地静态预览**用的老路子（dist + Word 解析一个进程），
+服务器版不再依赖它，仅在没有 Docker 的机器上临时预览时使用：
 
 ```bash
-pnpm build
 pnpm serve:check                          # 先体检转换器在不在（不启动服务）
 pnpm serve --host 0.0.0.0 --port 8080     # 静态 dist + Word 解析都在这一个进程里
 ```
@@ -392,12 +356,13 @@ libreoffice --version                    # 有输出就是装好了
 ## 工程结构
 
 ```
-src/
+frontend/src/
   App.tsx                  # 路由：/ 编辑器 · #/preview 报纸预览 · #/word 1:1 版
   ErrorBoundary.tsx        # 白屏兜底/存档恢复
   editor/
     Editor.tsx             # 外壳、快捷键、打印 @page、调试钩子
     store.ts               # 文档模型/历史/横竖版/自动高度/分页/背景
+    serverSync.ts          # 服务器镜像层（凭证 ?u=&k=、401 横幅）
     layout.ts              # 几何、避让、压缩、按行切割、分页（纯函数）
     Canvas.tsx             # 画布、拖动、测量、切割、框选区域
     Inspector.tsx          # 属性面板（页面/元素/自动排版/背景）
@@ -407,11 +372,11 @@ src/
   styles/
     newspaper.css          # 报纸版模板样式
     global.css             # 错误兜底样式
-scripts/
+frontend/scripts/
   smoke.mjs                # Playwright 回归
-  inline-build.mjs         # 构建后内联成单文件
-tools/
-  browser-utils.mjs        # 冒烟/MCP 共用浏览器工具
+  serve.mjs                # 本地静态预览（含 Word 解析）
+backend/tools/
+  layout/                  # 排版引擎（schema/geometry/style/blocks，compute 服务用）
   import/
     server-plugin.mjs      # Vite 中间件 POST /@doc-import（dev/preview 可用）
     parse.mjs              # .doc → HTML → 段落块（调用 textutil）
@@ -424,6 +389,8 @@ tools/
     server.mjs             # 项目 MCP（stdio）
     selftest.mjs           # MCP 自测
     README.md              # MCP 接入说明
+backend/compute-server.mjs # 容器内计算服务入口（只算不存）
+backend-fastapi/app/       # FastAPI 网关（main/auth/models/admin/migrate）
 public/images/             # 默认配图（img1.png）
 ```
 
@@ -434,12 +401,11 @@ pnpm typecheck
 pnpm smoke        # Playwright 回归，47 项，约 100 秒
 pnpm mcp:selftest
 pnpm import:verify ~/Desktop/docs/地理时政周刊一.doc   # Word 导入回归
-node scripts/desktop-check.mjs                          # Electron 桌面版自检（起真窗口）
 ```
 
 **前置条件**：`pnpm smoke` / `import:verify` 会自己起 dev server（5173 被占用会直接复用），
 依赖 Playwright 缓存的 Chromium（`pnpm exec playwright-core install chromium` 一次即可）；
-`import:verify` 需要一份真实 .doc；`desktop-check` 需要先 `pnpm build`。
+`import:verify` 需要一份真实 .doc。
 失败先看 `artifacts/smoke/99-failure.png` 与控制台第一条 ✗；上一轮强杀留下的
 孤儿 dev server 会卡住用例（表现为 `waitForFunction` 超时），清掉 5173 再跑。
 
@@ -529,8 +495,8 @@ paiban_eval {expression}        # 页面里执行 JS，可直接用 api
   "mcpServers": {
     "paiban": {
       "command": "node",
-      "args": ["tools/paiban-mcp/server.mjs"],
-      "cwd": "/Users/gongyi/wenxiang/paiban"
+      "args": ["backend/tools/paiban-mcp/server.mjs"],
+      "cwd": "/Users/gongyi/wenxiang/paiban/backend"
     }
   }
 }

@@ -11,8 +11,9 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 
-// 本文件在 backend/tools/ 下，仓库根要往上两级（artifacts、node_modules、dist 都在根）
+// 本文件在 backend/tools/ 下：ROOT = 仓库根（dist、artifacts），FRONTEND = 前端工程（node_modules/vite 在那）
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+export const FRONTEND = path.join(ROOT, 'frontend')
 /**
  * 编辑器地址。本机开发常用 5174（5173 上可能还挂着别的东西），
  * 所以不写死端口：先用环境变量 PAIBAN_URL，否则依次探 5174 → 5173，都没起才自己拉一个。
@@ -57,10 +58,10 @@ export async function ensureServer() {
   if (await reachable(url)) return { started: false, url }
   if (serverPromise) return serverPromise
   serverPromise = (async () => {
-    const vite = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')
-    if (!fsSync.existsSync(vite)) throw new Error('找不到 vite，请先执行 pnpm install')
+    const vite = path.join(FRONTEND, 'node_modules', 'vite', 'bin', 'vite.js')
+    if (!fsSync.existsSync(vite)) throw new Error('找不到 vite，请在 frontend/ 下执行 pnpm install')
     const proc = spawn(process.execPath, [vite, '--host', '127.0.0.1', '--port', String(SPAWN_PORT), '--strictPort'], {
-      cwd: ROOT,
+      cwd: FRONTEND,
       stdio: 'ignore',
       detached: false,
     })

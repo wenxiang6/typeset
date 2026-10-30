@@ -1,5 +1,4 @@
 node_modules
-dist
 release
 artifacts
 build
@@ -11,5 +10,5 @@ build
 .git
 var
 docs
-*.doc
 design-spec.html
+# 注意：dist 不能排除——compute 镜像要 COPY dist（FastAPI 网关那侧是卷挂载，不进镜像）

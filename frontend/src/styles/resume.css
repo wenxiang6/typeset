@@ -1,0 +1,149 @@
+/* 简历排版后门 —— 蓝色商务单栏简历样式（精确复刻「老鱼简历」模板） */
+
+.rs-root {
+  --rs-accent: #4A7BF7;
+  --rs-accent-soft: #DCE6FB;
+  width: 100%;
+  font-family: "Lantinghei SC", "PingFang SC", "Heiti SC", "SimHei", "Microsoft YaHei", sans-serif;
+  color: #2b2b2b;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ---------- 顶部个人信息区 ---------- */
+.rs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.rs-h-left { flex: 1; min-width: 0; }
+.rs-name {
+  font-size: 24px;
+  font-weight: 800;
+  color: #2b2b2b;
+  letter-spacing: 1px;
+  line-height: 1.25;
+}
+.rs-contacts {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+}
+.rs-c {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #2b2b2b;
+}
+.rs-c .rs-ci {
+  color: var(--rs-accent);
+  display: inline-flex;
+  align-items: center;
+}
+.rs-c .rs-ci svg { display: block; }
+.rs-c-tag {
+  background: var(--rs-accent);
+  color: #fff;
+  padding: 2px 9px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.rs-c-tag .rs-ci { color: #fff; }
+.rs-c-tag .rs-ct { color: #fff; }
+.rs-h-right { flex: none; }
+.rs-photo {
+  width: 96px;
+  height: 120px;
+  object-fit: cover;
+  background: #f2f4f8;
+  border: 1px solid #e6e9ef;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b9bfc9;
+  font-size: 12px;
+}
+
+/* ---------- 模块标题条：浅蓝底 + 左侧深蓝竖条 ---------- */
+.rs-sec-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 0 12px;
+  padding: 7px 12px;
+  background: var(--rs-accent-soft);
+}
+.rs-sec-bar {
+  width: 5px;
+  height: 20px;
+  background: var(--rs-accent);
+  border-radius: 1px;
+  flex: none;
+}
+.rs-sec-text {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--rs-accent);
+  line-height: 1;
+}
+
+/* ---------- 教育经历 ---------- */
+.rs-edu-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 0;
+}
+.rs-edu-school { font-weight: 700; color: #2b2b2b; font-size: 15px; }
+.rs-edu-major { color: #6b7280; }
+.rs-edu-degree { color: #6b7280; }
+.rs-edu-time { margin-left: auto; color: #9a9fa8; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* ---------- 专业技能 ---------- */
+.rs-sk-heading { font-weight: 700; color: #2b2b2b; font-size: 14px; margin-bottom: 6px; }
+.rs-sk-intro { color: #3a3a3a; margin: 0 0 12px; }
+.rs-sk-other-heading { font-weight: 700; color: #2b2b2b; margin-bottom: 4px; }
+.rs-sk-list {
+  margin: 0;
+  padding-left: 22px;
+  list-style: decimal;
+}
+.rs-sk-list li { padding: 2px 0; color: #3a3a3a; }
+.rs-sk-list li::marker { color: var(--rs-accent); font-weight: 700; }
+.rs-sk-key { font-weight: 700; color: #2b2b2b; }
+
+/* ---------- 工作经历 / 项目经历 ---------- */
+.rs-works { margin-bottom: 4px; }
+.rs-work { margin-bottom: 16px; }
+.rs-work-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.rs-work-company { font-weight: 700; color: #2b2b2b; font-size: 15px; }
+.rs-work-time { margin-left: auto; color: #9a9fa8; font-size: 13px; font-variant-numeric: tabular-nums; }
+.rs-work-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 4px 0 8px;
+}
+.rs-work-dept { font-weight: 700; color: #4b5563; }
+.rs-work-role { color: #6b7280; }
+.rs-work-city { color: #6b7280; }
+.rs-work-list {
+  margin: 0;
+  padding-left: 22px;
+  color: #3a3a3a;
+}
+.rs-work-list li { padding: 2px 0; }
+.rs-work-list li::marker { color: var(--rs-accent); font-weight: 700; }
+.rs-work-key { font-weight: 700; color: #2b2b2b; }
+
+/* 项目经历的部门名可选：无 department 时不占位 */
+.rs-project .rs-work-sub { gap: 10px; }

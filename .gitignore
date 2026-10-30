@@ -14,3 +14,14 @@ public/images/imported/
 
 # 服务器部署时导入图片的落盘目录（pnpm serve 默认位置）
 var/
+
+# FastAPI 后端本地开发产物
+backend-fastapi/.venv/
+backend-fastapi/dev.db
+backend-fastapi/test.db
+backend-fastapi/old-paiban.db
+__pycache__/
+.pytest_cache/
+
+# 环境变量（含密钥，绝不提交）
+.env

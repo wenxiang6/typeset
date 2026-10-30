@@ -29,6 +29,7 @@ import { buildElements } from '../tools/import/rules.mjs'
 import { extractDocImages } from '../tools/import/images.mjs'
 import { normalizeLayout, validateLayout } from '../tools/layout/schema.mjs'
 import { buildDoc } from '../tools/layout/geometry.mjs'
+import { compressImage } from './image-compress.mjs'
 
 const MAX_BYTES = 48 * 1024 * 1024
 const JOB_TTL = 5 * 60 * 1000
@@ -143,9 +144,10 @@ function applyOverrides(doc, o) {
 }
 
 /**
- * @param {{ persist: { writeDoc: (raw: string, push?: boolean) => boolean }, distDir: string, port: number, log?: (s: string) => void }} opts
+ * @param {{ persist?: { writeDoc: (raw: string, push?: boolean) => boolean } | null, distDir: string, port: number, log?: (s: string) => void, returnDoc?: boolean }} opts
+ *   returnDoc=true：计算服务模式——不落库，响应里带 doc（raw 字符串），由网关（FastAPI）负责存储
  */
-export function createFormatApi({ persist, distDir, port, log = () => {} }) {
+export function createFormatApi({ persist = null, distDir, port, log = () => {}, returnDoc = false }) {
   /** @type {Map<string, { payload: any, resolve: (v: any) => void, reject: (e: any) => void, at: number }>} */
   const jobs = new Map()
   /** 串行队列：同时起多个 Chromium 会把小内存机器打爆 */
@@ -216,8 +218,8 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
     }
   }
 
-  /** 内联图片（dataUrl / base64）落盘，并把 src 换成可访问路径 */
-  function saveInlineImages(layout) {
+  /** 内联图片（dataUrl / base64）落盘，并把 src 换成可访问路径。大图自动压成 webp。 */
+  async function saveInlineImages(layout) {
     const warnings = []
     for (const b of layout.blocks) {
       if (b.type !== 'image') continue
@@ -227,10 +229,16 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
         const m = /^data:(image\/[a-zA-Z+]+);base64,([\s\S]+)$/.exec(String(data))
         const mime = m ? m[1] : 'image/png'
         const b64 = (m ? m[2] : String(data)).replace(/\s+/g, '')
-        const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg')
+        let buf = Buffer.from(b64, 'base64')
+        let ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg')
+        const compressed = await compressImage(buf)
+        if (compressed) {
+          buf = compressed.data
+          ext = compressed.ext
+        }
         const name = `ai-img-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}.${ext}`
         fs.mkdirSync(imageDir, { recursive: true })
-        fs.writeFileSync(path.join(imageDir, name), Buffer.from(b64, 'base64'))
+        fs.writeFileSync(path.join(imageDir, name), buf)
         b.src = `/images/imported/${name}`
       } catch (err) {
         warnings.push(`图片写入失败：${err?.message || err}`)
@@ -267,7 +275,7 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
         const { doc, report } = buildDoc(layout)
         const push = url.searchParams.get('push') !== '0'
         const raw = JSON.stringify(doc)
-        const saved = persist?.writeDoc ? persist.writeDoc(raw, push) : false
+        const saved = returnDoc ? false : (persist?.writeDoc ? persist.writeDoc(raw, push) : false)
         log(`语义排版：${report.pages} 页 / ${report.elements} 组件 / ${report.chars} 字（${layout.blocks.length} 块）`)
         json(res, 200, {
           ok: true,
@@ -277,6 +285,7 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
           report,
           warnings: [...warnings, ...imgWarnings],
           saved,
+          ...(returnDoc ? { doc: raw } : {}),
         })
         return true
       }
@@ -378,8 +387,15 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
             await fsp.mkdir(imageDir, { recursive: true })
             images = await Promise.all(
               extracted.map(async (img, i) => {
-                const name = `doc-img-${jobId.slice(0, 8)}-${i + 1}.${img.mime.split('/')[1]}`
-                await fsp.writeFile(path.join(imageDir, name), img.data)
+                let data = img.data
+                let ext = img.mime.split('/')[1]
+                const compressed = await compressImage(data)
+                if (compressed) {
+                  data = compressed.data
+                  ext = compressed.ext
+                }
+                const name = `doc-img-${jobId.slice(0, 8)}-${i + 1}.${ext}`
+                await fsp.writeFile(path.join(imageDir, name), data)
                 return { ...img, url: `/images/imported/${name}` }
               }),
             )
@@ -407,7 +423,7 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
           jobs.delete(jobId)
           applyOverrides(result.doc, overrides)
           const raw = JSON.stringify(result.doc)
-          const saved = persist?.writeDoc(raw, true) ?? false
+          const saved = returnDoc ? false : (persist?.writeDoc ? persist.writeDoc(raw, true) : false)
           return {
             ok: true,
             pages: result.doc.pages.length,
@@ -415,6 +431,7 @@ export function createFormatApi({ persist, distDir, port, log = () => {} }) {
             warnings: result.warnings,
             saved,
             job: jobId,
+            ...(returnDoc ? { doc: raw } : {}),
           }
         }
 

@@ -32,8 +32,8 @@ export function layoutSemantic(input, opts = {}) {
 }
 
 /** 推送语义 JSON 到服务端（服务端排版并落库，push=1 让前端自动载入） */
-export async function postElements(base, layout, timeout = 30000) {
-  const url = `${base.replace(/\/$/, '')}/api/elements`
+export async function postElements(base, layout, timeout = 30000, cred = null) {
+  const url = `${base.replace(/\/$/, '')}/api/elements${cred ? `?u=${encodeURIComponent(cred.u)}&k=${cred.k}` : ''}`
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -51,8 +51,9 @@ export async function postElements(base, layout, timeout = 30000) {
 }
 
 /** 兜底：推送排好的 doc 原文到 /api/doc?push=1 */
-export async function postDoc(base, doc, timeout = 30000) {
-  const url = `${base.replace(/\/$/, '')}/api/doc?push=1`
+export async function postDoc(base, doc, timeout = 30000, cred = null) {
+  const q = cred ? `&u=${encodeURIComponent(cred.u)}&k=${cred.k}` : ''
+  const url = `${base.replace(/\/$/, '')}/api/doc?push=1${q}`
   const res = await fetch(url, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },

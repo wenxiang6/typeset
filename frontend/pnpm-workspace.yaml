@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: set this to true or false
+# pnpm 12 在这里声明允许执行构建脚本的依赖
+onlyBuiltDependencies:
+  - esbuild

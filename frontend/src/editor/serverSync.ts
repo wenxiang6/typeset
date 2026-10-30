@@ -2,16 +2,77 @@
  * 服务器同步镜像层（尽力而为，不阻塞主流程）
  *
  * 背景：localStorage 绑定「浏览器 + 设备」，换浏览器/换电脑数据就没了。
- * 这里把主存档 / 快照 / 模板库异步镜像到部署服务器（SQLite），
+ * 这里把主存档 / 快照 / 模板库异步镜像到部署服务器（PostgreSQL），
  * 本地仍是主存（同步、快），服务器是跨设备备份。
+ *
+ * 多用户（2026-10-30 起）：
+ * - 凭证 = md5(name + ':' + secret)，通过 ?u=<name>&k=<md5> 链接带来，
+ *   首次打开写入 localStorage，之后所有 /api 请求自动带上
+ * - 401（凭证无效/被重置）→ 页面顶部横幅明确提示，绝不静默
  *
  * 设计原则：
  * - 全部 fire-and-forget：镜像失败静默吞掉，绝不影响本地保存体验；
- * - 探活只做一次（缓存 Promise），服务器不可用（如 Electron 桌面版）时全部调用立刻空转；
+ * - 探活只做一次（缓存 Promise），服务器不可用时全部调用立刻空转；
  * - 恢复方向：本机没有存档而服务器有 → 启动时从服务器拉回来。
  */
 
+const CRED_KEY = 'paiban-cred'
 let healthPromise: Promise<boolean> | null = null
+let credCache: { u: string; k: string } | null | undefined
+
+import { queryClient } from '../lib/queryClient'
+
+/** 凭证：URL ?u=&k= 优先（写入 localStorage），否则读本地存的 */
+function credential(): { u: string; k: string } | null {
+  if (credCache !== undefined) return credCache
+  try {
+    const sp = new URLSearchParams(window.location.search)
+    const u = sp.get('u')
+    const k = sp.get('k')
+    if (u && k) {
+      credCache = { u, k }
+      localStorage.setItem(CRED_KEY, JSON.stringify(credCache))
+      return credCache
+    }
+    const saved = localStorage.getItem(CRED_KEY)
+    credCache = saved ? (JSON.parse(saved) as { u: string; k: string }) : null
+  } catch {
+    credCache = null
+  }
+  return credCache
+}
+
+/** 凭证 query 片段；没有凭证返回空串 */
+function credQuery(): string {
+  const c = credential()
+  if (!c) return ''
+  return `u=${encodeURIComponent(c.u)}&k=${encodeURIComponent(c.k)}`
+}
+
+function withCred(path: string): string {
+  const q = credQuery()
+  if (!q) return path
+  return path + (path.includes('?') ? '&' : '?') + q
+}
+
+let authBannerShown = false
+/** 401：凭证无效或被重置。本地数据不受影响，但不能同步/拉取。 */
+function notifyAuthError() {
+  if (authBannerShown) return
+  authBannerShown = true
+  try {
+    const div = document.createElement('div')
+    div.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;' +
+      'padding:10px 16px;font:13px/1.5 system-ui,sans-serif;text-align:center'
+    div.textContent =
+      '访问凭证无效或已被重置——本地编辑不受影响，但无法同步服务器。请通过你的个人链接（含 ?u=&k=）重新打开本页。'
+    document.body.appendChild(div)
+  } catch {
+    /* 页面还没挂载 body 的极端情况：下次 401 再试 */
+    authBannerShown = false
+  }
+}
 
 /** 服务器持久化是否可用（结果缓存，整个会话只探一次） */
 export function serverAvailable(): Promise<boolean> {
@@ -27,7 +88,8 @@ async function mirrorPut(path: string, body: string, json = false) {
   try {
     if (!(await serverAvailable())) return
     const headers: Record<string, string> = json ? { 'Content-Type': 'application/json' } : { 'Content-Type': 'text/plain' }
-    await fetch(path, { method: 'PUT', headers, body, signal: AbortSignal.timeout(15000) })
+    const resp = await fetch(withCred(path), { method: 'PUT', headers, body, signal: AbortSignal.timeout(15000) })
+    if (resp.status === 401) notifyAuthError()
   } catch {
     /* 镜像失败不影响本地 */
   }
@@ -68,27 +130,52 @@ export interface ServerDocMeta {
  * 只有外部工具推送才会改 pushedAt，所以不会出现自己冲掉自己的情况。
  */
 export async function fetchServerDocMeta(): Promise<ServerDocMeta | null> {
-  try {
-    if (!(await serverAvailable())) return null
-    const resp = await fetch('/api/doc', { signal: AbortSignal.timeout(10000) })
-    if (!resp.ok) return null
-    const data = (await resp.json()) as { raw?: string | null; at?: number; pushedAt?: number }
-    if (typeof data.raw !== 'string' || !data.raw) return null
-    return { raw: data.raw, at: Number(data.at ?? 0), pushedAt: Number(data.pushedAt ?? 0) }
-  } catch {
-    return null
-  }
+  const cred = credential()
+  // TanStack Query 收编：同 key 请求在 staleTime 内去重，编辑器轮询和启动恢复共享缓存
+  return queryClient.fetchQuery({
+    queryKey: ['server-doc-meta', cred?.u ?? 'anon'],
+    queryFn: async () => {
+      try {
+        if (!(await serverAvailable())) return null
+        const resp = await fetch(withCred('/api/doc'), { signal: AbortSignal.timeout(10000) })
+        if (resp.status === 401) {
+          notifyAuthError()
+          return null
+        }
+        if (!resp.ok) return null
+        const data = (await resp.json()) as { raw?: string | null; at?: number; pushedAt?: number }
+        if (typeof data.raw !== 'string' || !data.raw) return null
+        return { raw: data.raw, at: Number(data.at ?? 0), pushedAt: Number(data.pushedAt ?? 0) } as ServerDocMeta
+      } catch {
+        return null
+      }
+    },
+    staleTime: 3000,
+    retry: false,
+  })
 }
 
 /** 从服务器拉模板库列表；没有或不可用返回 null */
 export async function fetchServerTemplates(): Promise<unknown[] | null> {
-  try {
-    if (!(await serverAvailable())) return null
-    const resp = await fetch('/api/templates', { signal: AbortSignal.timeout(10000) })
-    if (!resp.ok) return null
-    const data = (await resp.json()) as { list?: unknown[] }
-    return Array.isArray(data.list) ? data.list : null
-  } catch {
-    return null
-  }
+  const cred = credential()
+  return queryClient.fetchQuery({
+    queryKey: ['server-templates', cred?.u ?? 'anon'],
+    queryFn: async () => {
+      try {
+        if (!(await serverAvailable())) return null
+        const resp = await fetch(withCred('/api/templates'), { signal: AbortSignal.timeout(10000) })
+        if (resp.status === 401) {
+          notifyAuthError()
+          return null
+        }
+        if (!resp.ok) return null
+        const data = (await resp.json()) as { list?: unknown[] }
+        return Array.isArray(data.list) ? data.list : null
+      } catch {
+        return null
+      }
+    },
+    staleTime: 5000,
+    retry: false,
+  })
 }

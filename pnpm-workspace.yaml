@@ -1,8 +1,0 @@
-allowBuilds:
-  electron: true
-  electron-winstaller: false
-  esbuild: true
-# pnpm 12 需要在此声明允许执行构建脚本的依赖
-onlyBuiltDependencies:
-  - esbuild
-  - electron

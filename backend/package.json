@@ -1,0 +1,18 @@
+{
+  "name": "paiban-backend",
+  "private": true,
+  "type": "module",
+  "description": "排版引擎 + Word 导入 + MCP（运行时零 npm 依赖；playwright-core 仅回归/截图脚本用）",
+  "scripts": {
+    "mcp": "node tools/paiban-mcp/server.mjs",
+    "mcp:selftest": "node tools/paiban-mcp/selftest.mjs",
+    "import:verify": "node tools/import/verify.mjs",
+    "import:debug": "node tools/import/cli.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
+  },
+  "dependencies": {
+    "sharp": "^0.35.5"
+  }
+}

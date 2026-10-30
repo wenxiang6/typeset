@@ -29,12 +29,32 @@ import {
   sleep,
   waitSettled,
 } from '../browser-utils.mjs'
+import { createHash } from 'node:crypto'
 import { normalizeLayout, validateLayout } from '../layout/schema.mjs'
 import { buildDoc } from '../layout/geometry.mjs'
 import { imageToDataUrl, resolveLocalImages } from '../layout/local-image.mjs'
 import { DEFAULT_BASE, postElements } from '../layout/index.mjs'
 
 const SERVER_INFO = { name: 'paiban-mcp', version: '1.1.0' }
+
+/** 多用户凭证：读 skill 的 config.json（users 数组），按名字匹配算 md5(name:secret) */
+async function resolveCred(userName) {
+  try {
+    const cfgPath = process.env.PAIBAN_SKILL_CONFIG
+      || '/Users/gongyi/.workbuddy/skills/paiban-word-to-json/config.json'
+    const cfg = JSON.parse(await fs.readFile(cfgPath, 'utf8'))
+    const users = (cfg.users || []).filter((u) => u.name && u.secret && u.secret !== 'REPLACE_ME')
+    if (!users.length) return { error: 'config.json 的 users 还没填真实用户（name/secret）' }
+    const u = userName ? users.find((x) => x.name === userName) : users.length === 1 ? users[0] : null
+    if (!u) {
+      return { error: `没找到用户「${userName}」。config.json 里有：${users.map((x) => x.name).join('、')}` }
+    }
+    const k = createHash('md5').update(`${u.name}:${u.secret}`).digest('hex')
+    return { cred: { u: u.name, k } }
+  } catch (err) {
+    return { error: `读 skill config.json 失败：${err?.message || err}` }
+  }
+}
 const PROTOCOL_VERSION = '2024-11-05'
 
 let rpcBuffer = ''
@@ -313,6 +333,7 @@ const TOOLS = [
         layout: { type: ['object', 'string'], description: '语义 JSON 对象或 JSON 字符串' },
         path: { type: 'string', description: '或者给本地 .json 路径' },
         base: { type: 'string', description: `服务器地址，默认 ${DEFAULT_BASE}` },
+        user: { type: 'string', description: '多用户：推送目标用户名（须在 skill config.json 的 users 里）。只有一个用户时可省略' },
         orientation: { type: 'string', enum: ['landscape', 'portrait'], description: '覆盖纸张方向' },
         dryRun: { type: 'boolean', description: '只排版不推送' },
       },
@@ -394,8 +415,12 @@ async function layoutTool(name, args = {}) {
     }
 
     const base = String(args.base || process.env.PAIBAN_BASE || DEFAULT_BASE).replace(/\/$/, '')
+    const credRes = await resolveCred(args.user ?? process.env.PAIBAN_USER)
+    if (credRes.error) {
+      return { text: JSON.stringify({ ok: false, error: credRes.error }, null, 2) }
+    }
     try {
-      const res = await postElements(base, layout)
+      const res = await postElements(base, layout, 30000, credRes.cred)
       const body = res.json ?? { raw: String(res.text).slice(0, 400) }
       return {
         text: JSON.stringify(
@@ -406,7 +431,11 @@ async function layoutTool(name, args = {}) {
             images: img.resolved,
             warnings: allWarnings,
             result: body,
-            hint: res.ok ? '已推送到服务器：刷新网页（或等自动载入）就能看到，再手工微调即可。' : '推送失败，检查服务器地址与 /api/elements 是否存在。',
+            hint: res.ok
+              ? '已推送到服务器：刷新网页（或等自动载入）就能看到，再手工微调即可。'
+              : res.status === 401
+                ? '推送被拒（401）：用户名或密钥不对。检查 skill config.json 的 users 与服务器 users 表是否一致。'
+                : '推送失败，检查服务器地址与 /api/elements 是否存在。',
           },
           null,
           2,

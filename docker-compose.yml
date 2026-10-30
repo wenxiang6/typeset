@@ -1,0 +1,57 @@
+# 地理周刊排版 · 服务器版（FastAPI 网关 + Node 计算服务 + PostgreSQL）
+#
+# 使用前先准备：
+#   1. cp .env.example .env 并填好（BASE_URL / ADMIN_SECRET / POSTGRES_PASSWORD）
+#   2. pnpm build   （前端 dist/ 必须先构建出来）
+# 启动：docker compose up -d --build
+# 迁移老数据：见 DEPLOY-API.md
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paiban
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 里设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: paiban
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432" # 仅本机暴露，供迁移脚本用
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paiban"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  compute:
+    build:
+      context: .
+      dockerfile: backend-fastapi/compute.Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./dist:/srv/dist # 需要写 /images/imported（稿件配图落盘）
+    expose:
+      - "9706" # 仅内部网络，不发布到公网
+
+  api:
+    build: ./backend-fastapi
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      compute:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+asyncpg://paiban:${POSTGRES_PASSWORD}@postgres:5432/paiban
+      COMPUTE_URL: http://compute:9706
+      BASE_URL: ${BASE_URL:?请在 .env 里设置 BASE_URL}
+      ADMIN_SECRET: ${ADMIN_SECRET:?请在 .env 里设置 ADMIN_SECRET}
+      DIST_DIR: /srv/dist
+    ports:
+      - "9705:80"
+    volumes:
+      - ./dist:/srv/dist:ro
+
+volumes:
+  pgdata:
