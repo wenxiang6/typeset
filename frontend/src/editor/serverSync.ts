@@ -49,6 +49,14 @@ function credQuery(): string {
   return `u=${encodeURIComponent(c.u)}&k=${encodeURIComponent(c.k)}`
 }
 
+/** 模块加载即解析凭证（URL ?u=&k= 在脚本启动时就在），供 userKey() 等同步场景使用 */
+credCache = credential()
+
+/** 当前凭证用户名；未带凭证返回 null。本地存档按用户隔离时用 */
+export function currentUserName(): string | null {
+  return credential()?.u ?? null
+}
+
 function withCred(path: string): string {
   const q = credQuery()
   if (!q) return path

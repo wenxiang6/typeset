@@ -11,7 +11,21 @@
  * 写入成功后会把主存档/快照异步镜像到部署服务器（serverSync，尽力而为）。
  */
 
-import { mirrorDoc, mirrorSnapshots } from './serverSync'
+import { mirrorDoc, mirrorSnapshots, currentUserName } from './serverSync'
+
+/**
+ * 本地存储 key 按凭证用户隔离：paiban-editor-doc-v1:<name>。
+ * 修复「同一浏览器先后打开两个人的链接，本地存档互相串、刷新覆盖对方版面」的问题。
+ * 未带凭证（旧单机用法）保持原 key，兼容历史数据。
+ */
+export function userKey(base: string): string {
+  try {
+    const n = currentUserName()
+    return n ? `${base}:${encodeURIComponent(n)}` : base
+  } catch {
+    return base
+  }
+}
 
 export const DOC_KEY = 'paiban-editor-doc-v1'
 export const SNAP_KEY = 'paiban-doc-snapshots-v1'
@@ -111,7 +125,7 @@ function publish(next: SaveState) {
 export function subscribeExternalDoc(cb: (raw: string) => void): () => void {
   if (typeof window === 'undefined') return () => {}
   const onStorage = (e: StorageEvent) => {
-    if (e.key !== DOC_KEY || e.newValue == null) return
+    if (e.key !== userKey(DOC_KEY) || e.newValue == null) return
     cb(e.newValue)
   }
   window.addEventListener('storage', onStorage)
@@ -135,7 +149,7 @@ function isQuotaError(err: unknown) {
 
 function readSnapshots(): SnapshotRecord[] {
   try {
-    const raw = localStorage.getItem(SNAP_KEY)
+    const raw = localStorage.getItem(userKey(SNAP_KEY))
     if (!raw) return []
     const parsed = JSON.parse(raw) as { list?: SnapshotRecord[] }
     return Array.isArray(parsed?.list) ? parsed.list : []
@@ -145,7 +159,7 @@ function readSnapshots(): SnapshotRecord[] {
 }
 
 function writeSnapshots(list: SnapshotRecord[]) {
-  localStorage.setItem(SNAP_KEY, JSON.stringify({ v: 1, list }))
+  localStorage.setItem(userKey(SNAP_KEY), JSON.stringify({ v: 1, list }))
 }
 
 /** 只留元信息给界面用（不含 raw，避免把几 MB 字符串塞进 React state） */
@@ -188,7 +202,7 @@ export function pushSnapshot(raw: string, doc: unknown): SnapshotMeta[] {
       if (!isQuotaError(err) || kept.length === 1) {
         if (kept.length === 1) {
           try {
-            localStorage.removeItem(SNAP_KEY)
+            localStorage.removeItem(userKey(SNAP_KEY))
           } catch {
             /* 忽略 */
           }
@@ -205,7 +219,7 @@ export function pushSnapshot(raw: string, doc: unknown): SnapshotMeta[] {
 /** 清空全部快照 */
 export function clearSnapshots() {
   try {
-    localStorage.removeItem(SNAP_KEY)
+    localStorage.removeItem(userKey(SNAP_KEY))
   } catch {
     /* 忽略 */
   }
@@ -224,11 +238,11 @@ export function writeDoc(raw: string): SaveState {
 
 function writeDocRaw(raw: string): SaveState {
   try {
-    localStorage.setItem(DOC_KEY, raw)
+    localStorage.setItem(userKey(DOC_KEY), raw)
   } catch (err) {
     clearSnapshots()
     try {
-      localStorage.setItem(DOC_KEY, raw)
+      localStorage.setItem(userKey(DOC_KEY), raw)
       return { at: Date.now(), ok: true, bytes: raw.length }
     } catch (err2) {
       return {
@@ -240,7 +254,7 @@ function writeDocRaw(raw: string): SaveState {
     }
   }
   try {
-    localStorage.setItem(SAVE_META_KEY, JSON.stringify({ at: Date.now(), bytes: raw.length }))
+    localStorage.setItem(userKey(SAVE_META_KEY), JSON.stringify({ at: Date.now(), bytes: raw.length }))
   } catch {
     /* 元信息写不进去不影响主存档 */
   }
@@ -250,7 +264,7 @@ function writeDocRaw(raw: string): SaveState {
 /** 上一次成功保存的时间（刷新后也能显示） */
 export function lastSavedAt(): number | null {
   try {
-    const raw = localStorage.getItem(SAVE_META_KEY)
+    const raw = localStorage.getItem(userKey(SAVE_META_KEY))
     if (!raw) return null
     const at = (JSON.parse(raw) as { at?: number })?.at
     return typeof at === 'number' ? at : null
@@ -262,7 +276,7 @@ export function lastSavedAt(): number | null {
 /** 存档损坏时先原样留一份，别让 400ms 后的自动保存把它盖掉 */
 export function backupCorrupt(raw: string) {
   try {
-    localStorage.setItem(CORRUPT_KEY, raw)
+    localStorage.setItem(userKey(CORRUPT_KEY), raw)
   } catch {
     /* 忽略 */
   }
@@ -270,7 +284,7 @@ export function backupCorrupt(raw: string) {
 
 export function readCorruptBackup(): string | null {
   try {
-    return localStorage.getItem(CORRUPT_KEY)
+    return localStorage.getItem(userKey(CORRUPT_KEY))
   } catch {
     return null
   }

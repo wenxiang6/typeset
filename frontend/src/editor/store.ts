@@ -44,8 +44,9 @@ import {
 } from './autosave'
 import { fetchServerDocMeta } from './serverSync'
 import { viewServerOnly } from './viewMode'
+import { userKey } from './autosave'
 
-const STORAGE_KEY = DOC_KEY
+const STORAGE_KEY = userKey(DOC_KEY)
 const HISTORY_LIMIT = 60
 
 /** 正文块变体：默认黑体五号的作用范围 */
@@ -292,7 +293,7 @@ export function useEditor() {
 
         let seen = 0
         try {
-          seen = Number(localStorage.getItem(PUSH_SEEN_KEY) || 0)
+          seen = Number(localStorage.getItem(userKey(PUSH_SEEN_KEY)) || 0)
         } catch {
           seen = 0
         }
@@ -312,7 +313,7 @@ export function useEditor() {
             }
           }
           try {
-            localStorage.setItem(PUSH_SEEN_KEY, String(meta.pushedAt))
+            localStorage.setItem(userKey(PUSH_SEEN_KEY), String(meta.pushedAt))
           } catch {
             /* 忽略 */
           }
@@ -347,7 +348,7 @@ export function useEditor() {
       // 存档已经被清掉了（用户主动重置 / 测试重置）：不要把内存里的版面写回去
       let hasArchive = false
       try {
-        hasArchive = localStorage.getItem(DOC_KEY) !== null
+        hasArchive = localStorage.getItem(userKey(DOC_KEY)) !== null
       } catch {
         hasArchive = false
       }
@@ -862,7 +863,7 @@ export function useEditor() {
   /** 载入「另一个窗口刚写进 localStorage」的版本（走 commit，可 Ctrl+Z 反悔） */
   const loadExternalDoc = useCallback((): boolean => {
     try {
-      const raw = localStorage.getItem(DOC_KEY)
+      const raw = localStorage.getItem(userKey(DOC_KEY))
       if (!raw) return false
       const parsed = JSON.parse(raw) as Doc
       if (!parsed || !Array.isArray(parsed.pages) || !parsed.pages.length) return false
