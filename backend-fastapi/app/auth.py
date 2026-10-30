@@ -7,6 +7,7 @@
 """
 
 import hashlib
+from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
@@ -21,9 +22,10 @@ def md5_hex(s: str) -> str:
 
 
 def credential_for(name: str, secret: str) -> tuple[str, str]:
-    """返回 (k, viewerUrl 里的 query 片段)。供 admin 页与迁移脚本复用。"""
+    """返回 (k, viewerUrl 里的 query 片段)。name 走百分号编码——链接里不出现
+    中文/空格，聊天里裸贴、复制到浏览器都不会断。供 admin 页与迁移脚本复用。"""
     k = md5_hex(f"{name}:{secret}")
-    return k, f"u={name}&k={k}"
+    return k, f"u={quote(name, safe='')}&k={k}"
 
 
 def viewer_url(base_url: str, name: str, secret: str) -> str:

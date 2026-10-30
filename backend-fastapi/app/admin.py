@@ -412,7 +412,7 @@ async def _require_admin(request: Request) -> None:
 
 def _cred_block(name: str, secret: str) -> str:
     k, q = credential_for(name, secret)
-    url = f"{settings.base_url.rstrip('/')}/?{q}"
+    url = f"{settings.base_url.rstrip('/')}/view?{q}"
     return (
         f'<div class=cred><b>凭证（只展示这一次，关掉就没）</b><br>'
         f'名字：<code>{html.escape(name)}</code><br>secret：<code>{secret}</code><br>'
