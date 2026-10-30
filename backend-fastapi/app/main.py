@@ -50,6 +50,14 @@ async def health() -> dict:
     return {"ok": True}
 
 
+# ---------------- 凭证握手（推送前验证用户存在，不读不写任何数据） ----------------
+
+
+@app.get("/api/verify")
+async def verify(user: User = Depends(current_user)) -> dict:
+    return {"ok": True, "name": user.name}
+
+
 # ---------------- 主存档 ----------------
 
 

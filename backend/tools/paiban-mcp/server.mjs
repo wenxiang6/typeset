@@ -45,7 +45,8 @@ async function resolveCred(userName) {
     const cfg = JSON.parse(await fs.readFile(cfgPath, 'utf8'))
     const users = (cfg.users || []).filter((u) => u.name && u.secret && u.secret !== 'REPLACE_ME')
     if (!users.length) return { error: 'config.json 的 users 还没填真实用户（name/secret）' }
-    const u = userName ? users.find((x) => x.name === userName) : users.length === 1 ? users[0] : null
+    const fallback = cfg.defaultUser && users.find((x) => x.name === cfg.defaultUser)
+    const u = userName ? users.find((x) => x.name === userName) : users.length === 1 ? users[0] : fallback
     if (!u) {
       return { error: `没找到用户「${userName}」。config.json 里有：${users.map((x) => x.name).join('、')}` }
     }

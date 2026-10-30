@@ -70,6 +70,18 @@ async def test_health_public():
         assert (await c.get("/api/health")).json() == {"ok": True}
 
 
+async def test_verify_handshake():
+    """skill 推送前的凭证握手：401=用户不存在/密钥错，200=报出用户名。"""
+    await ensure_user()
+    async with client() as c:
+        assert (await c.get("/api/verify")).status_code == 401
+        bad = {**AUTH, "k": "wrong"}
+        assert (await c.get("/api/verify", params=bad)).status_code == 401
+        r = await c.get("/api/verify", params=AUTH)
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "name": NAME}
+
+
 async def test_doc_requires_auth():
     async with client() as c:
         assert (await c.get("/api/doc")).status_code == 401
