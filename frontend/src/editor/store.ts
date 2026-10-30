@@ -248,11 +248,17 @@ export function useEditor() {
     setDocState(next)
   }, [])
 
+  // 启动水合门闩：本地档/服务器稿哪份「定型」还没确定之前，绝不自动落盘。
+  // 否则挂载时的初始模板会在 400ms 后 PUT 上服务器，把刚推送的稿子冲掉
+  // （服务器 GET 走跨境链路要 1~6 秒，永远跑输本地 400ms 的防抖定时器）。
+  const hydratedRef = useRef(false)
+
   // 自动保存：改动 400ms 后落地（主存档），保证刷新/崩溃只丢最后 0.4 秒。
   // 注意这里不 setState：保存结果走 autosave 的订阅式小仓库，
   // 否则每保存一次就整棵树重渲染，会打断正在进行的拖动（表格行列线等）。
   useEffect(() => {
     rawRef.current = JSON.stringify(doc)
+    if (!hydratedRef.current) return
     markDirty()
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
@@ -265,7 +271,7 @@ export function useEditor() {
   // 滚动快照：编辑状态下每 10 秒打一份，专治「手滑之后才想起来」
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (!rawRef.current) return
+      if (!hydratedRef.current || !rawRef.current) return
       pushSnapshot(rawRef.current, docRef.current)
     }, SNAP_INTERVAL)
     return () => window.clearInterval(id)
@@ -331,6 +337,9 @@ export function useEditor() {
         setDoc(restored)
       } catch {
         /* 服务器不可用 / 数据损坏：保持初始文档 */
+      } finally {
+        // 水合完成（无论成败）：此后编辑器的改动才允许落盘/镜像
+        if (!cancelled) hydratedRef.current = true
       }
     })()
     return () => {
@@ -343,6 +352,8 @@ export function useEditor() {
   // 这里不能把它又写回去，否则重置等于没做。
   useEffect(() => {
     const flush = () => {
+      // 水合没完成时内存里还是挂载稿（可能是初始模板），绝不能写出去
+      if (!hydratedRef.current) return
       const raw = rawRef.current
       if (!raw || raw === lastWrittenRef.current) return
       // 存档已经被清掉了（用户主动重置 / 测试重置）：不要把内存里的版面写回去
@@ -826,6 +837,8 @@ export function useEditor() {
 
   /** 立刻写一次（不等 400ms 防抖），并顺手打一份快照 */
   const saveNow = useCallback(() => {
+    // 水合没完成：内存里可能还是初始模板，不写（工具栏会提示失败，稍后再点）
+    if (!hydratedRef.current) return false
     const raw = JSON.stringify(docRef.current)
     rawRef.current = raw
     const state = writeDocStorage(raw)
