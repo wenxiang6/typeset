@@ -291,14 +291,34 @@ function TreePage() {
     setLoadingJson(true)
     setJsonText('')
     try {
-      const resp = await adminApi.getJsonRaw(user, target)
-      setJsonText(await resp.text())
+      setJsonText(await adminApi.getJsonRaw(user, target))
     } catch (e) {
       setJsonText(`读取失败：${(e as Error).message}`)
     } finally {
       setLoadingJson(false)
     }
   }
+
+  const refetchJson = async () => {
+    if (!preview) return
+    setLoadingJson(true)
+    try {
+      setJsonText(await adminApi.getJsonRaw(preview.user, preview.target, true))
+    } catch (e) {
+      setJsonText(`读取失败：${(e as Error).message}`)
+    } finally {
+      setLoadingJson(false)
+    }
+  }
+
+  // 格式化展示：解析成功按 2 空格缩进展开（同层级对齐、下一层缩进），失败显示原文
+  const prettyJson = (() => {
+    try {
+      return JSON.stringify(JSON.parse(jsonText), null, 2)
+    } catch {
+      return jsonText
+    }
+  })()
 
   const treeData = (tree.data?.tree ?? []).map((u: TreeNode) => ({
     title: `${u.name}（${u.doc ? `主稿 ${fmtSize(u.doc.bytes)}` : '无稿件'}）`,
@@ -349,6 +369,7 @@ function TreePage() {
         footer={
           preview && (
             <Space>
+              <Button onClick={refetchJson} loading={loadingJson}>重新读取</Button>
               <Button
                 type="primary"
                 onClick={() => window.open(`/api/admin/json?user=${encodeURIComponent(preview.user)}&target=${encodeURIComponent(preview.target)}&download=1`)}
@@ -361,8 +382,22 @@ function TreePage() {
         }
       >
         {loadingJson ? <Spin /> : (
-          <pre style={{ maxHeight: 480, overflow: 'auto', background: '#fafafa', padding: 12, borderRadius: 8, fontSize: 12 }}>
-            {jsonText}
+          <pre
+            style={{
+              maxHeight: 480,
+              overflow: 'auto',
+              background: '#fafafa',
+              padding: 12,
+              borderRadius: 8,
+              fontSize: 12,
+              lineHeight: 1.6,
+              margin: 0,
+              fontFamily: 'SFMono-Regular, Menlo, Consolas, monospace',
+              whiteSpace: 'pre',
+              tabSize: 2,
+            }}
+          >
+            {prettyJson}
           </pre>
         )}
       </Modal>

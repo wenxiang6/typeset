@@ -108,7 +108,7 @@ async def test_doc_put_get_push():
         r = await c.put("/api/doc", params={**AUTH, "push": "1"}, content='{"pages":1}')
         j = r.json()
         assert j["ok"] is True and j["pushedAt"] == j["at"]
-        assert "viewerUrl" in j and f"u=%E6%B5%8B%E8%AF%95%E7%94%A8%E6%88%B7" in j["viewerUrl"] and j["viewerUrl"].endswith(f"k={K}")
+        assert "viewerUrl" in j and j["viewerUrl"].startswith("http://test:9705/?u=%E6%B5%8B%E8%AF%95%E7%94%A8%E6%88%B7") and j["viewerUrl"].endswith(f"k={K}")
 
         # 不带 push=1 的镜像写入：只更新 at，不动 pushedAt
         r2 = await c.put("/api/doc", params=AUTH, content='{"pages":2}')
@@ -241,7 +241,7 @@ async def test_admin_json_api():
         j = r.json()
         assert j["ok"] is True
         # u 必须是百分号编码：链接里不允许出现中文/空格（复制粘贴不能断）
-        assert "/view?u=%E7%8E%8B%E4%BA%94&k=" in j["viewerUrl"]
+        assert "?u=%E7%8E%8B%E4%BA%94&k=" in j["viewerUrl"]
         assert "王五" not in j["viewerUrl"] and " " not in j["viewerUrl"]
         k5 = md5_hex(f"王五:{j['secret']}")
         assert (await c.get("/api/doc", params={"u": "王五", "k": k5})).status_code == 200

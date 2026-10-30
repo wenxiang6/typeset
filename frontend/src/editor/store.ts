@@ -43,6 +43,7 @@ import {
   writeDoc as writeDocStorage,
 } from './autosave'
 import { fetchServerDocMeta } from './serverSync'
+import { viewServerOnly } from './viewMode'
 
 const STORAGE_KEY = DOC_KEY
 const HISTORY_LIMIT = 60
@@ -280,7 +281,8 @@ export function useEditor() {
       try {
         let localRaw: string | null = null
         try {
-          localRaw = localStorage.getItem(STORAGE_KEY)
+          // 只读模式（/view）：本机存档一律无视，服务器稿才是唯一事实
+          localRaw = viewServerOnly.on ? null : localStorage.getItem(STORAGE_KEY)
         } catch {
           localRaw = null
         }

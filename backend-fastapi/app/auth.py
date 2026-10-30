@@ -29,9 +29,10 @@ def credential_for(name: str, secret: str) -> tuple[str, str]:
 
 
 def viewer_url(base_url: str, name: str, secret: str) -> str:
-    """分享链接落点：/view 只读预览。本人编辑直接开站点根路径（凭证在本地会记住）。"""
+    """推送链接落点：编辑器（打开即可查看并微调，外部推送会自动载入并给旧稿打快照）。
+    纯只读预览是 /view?u=&k=，需要时手动把 / 换成 /view。"""
     _, q = credential_for(name, secret)
-    return f"{base_url.rstrip('/')}/view?{q}"
+    return f"{base_url.rstrip('/')}/?{q}"
 
 
 async def get_session() -> AsyncSession:
