@@ -264,7 +264,7 @@ function CredentialModal({ credential, onClose }: { credential: Credential | nul
           `密钥：${credential.secret}`,
           '',
           '使用方法（二选一）：',
-          '1. 在 WorkBuddy 里安装「paiban-word-to-json」技能后，把上面名字和密钥发给 AI，说「用这个凭证把周刊推送给我」；',
+          '1. 在你的 AI 工具（WorkBuddy / Claude Code / Codex 等均可）里装好「paiban-word-to-json」技能，把上面的名字和密钥发给 AI，说「用这个凭证把周刊推送给我」；',
           '2. 或直接在浏览器打开下面的链接，查看/微调你的版面：',
           credential.viewerUrl,
           '',
