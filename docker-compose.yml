@@ -1,10 +1,14 @@
-# 地理周刊排版 · 服务器版（FastAPI 网关 + Node 计算服务 + PostgreSQL）
+# 地理周刊排版 · 服务器版（FastAPI 网关 + Node 计算服务 + PostgreSQL + Caddy HTTPS）
 #
 # 使用前先准备：
-#   1. cp .env.example .env 并填好（BASE_URL / ADMIN_SECRET / POSTGRES_PASSWORD）
+#   1. cp .env.example .env 并填好（BASE_URL 用 https://你的域名 / ADMIN_SECRET / POSTGRES_PASSWORD）
 #   2. pnpm build   （前端 dist/ 必须先构建出来）
+#   3. 域名 A 记录指向服务器 IP；安全组放行 22 / 9705 / 80 / 443
 # 启动：docker compose up -d --build
 # 迁移老数据：见 DEPLOY-API.md
+#
+# Caddy 自动申请并续期 Let's Encrypt 证书（需要 80+443 可达）。
+# 不想上域名/HTTPS 的话：删掉 caddy 服务，继续用 http://IP:9705 也能跑。
 
 services:
   postgres:
@@ -48,10 +52,25 @@ services:
       BASE_URL: ${BASE_URL:?请在 .env 里设置 BASE_URL}
       ADMIN_SECRET: ${ADMIN_SECRET:?请在 .env 里设置 ADMIN_SECRET}
       DIST_DIR: /srv/dist
-    ports:
-      - "9705:80"
+    expose:
+      - "80" # 由 Caddy 反代到公网；不想用域名时把下面的 9705 映射加回来
     volumes:
       - ./dist:/srv/dist:ro
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
