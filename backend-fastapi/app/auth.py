@@ -40,12 +40,25 @@ async def get_session() -> AsyncSession:
         yield session
 
 
+async def lookup_user(u: str, k: str, session: AsyncSession) -> User | None:
+    """按 name 查 secret 原文重算 md5 比对。不匹配返回 None，不抛异常。"""
+    if not u or not k:
+        return None
+    row = (await session.execute(select(User).where(User.name == u))).scalar_one_or_none()
+    if row is None or md5_hex(f"{row.name}:{row.secret}") != k:
+        return None
+    return row
+
+
 async def current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
     u = request.query_params.get("u") or ""
     k = request.query_params.get("k") or ""
-    if not u or not k:
-        raise HTTPException(status_code=401, detail="unauthorized")
-    row = (await session.execute(select(User).where(User.name == u))).scalar_one_or_none()
-    if row is None or md5_hex(f"{row.name}:{row.secret}") != k:
+    row = await lookup_user(u, k, session)
+    if row is None:
+        # 只记「带了凭证但被拒」的：裸匿名的 401 是常态（门禁页/单机模式），记了全是噪音
+        if u or k:
+            from .audit import client_ip, log_event
+
+            await log_event("cred_401", user=u, ip=client_ip(request), ok=False)
         raise HTTPException(status_code=401, detail="unauthorized")
     return row

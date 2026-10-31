@@ -9,14 +9,14 @@
  */
 
 import { useState } from 'react'
-import { App as AntApp, Button, Input, Layout, Menu, Modal, Popconfirm, Space, Spin, Table, Tree, Typography } from 'antd'
+import { App as AntApp, Button, Input, InputNumber, Layout, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tree, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { adminApi, type AdminUser, type Credential, type TreeNode } from './api'
+import { adminApi, type AdminUser, type AuditRow, type Credential, type TreeNode } from './api'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
 
-type PageKey = 'users' | 'tree'
+type PageKey = 'users' | 'tree' | 'gate' | 'logs'
 
 export default function AdminApp() {
   return (
@@ -105,6 +105,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           items={[
             { key: 'users', label: '用户管理' },
             { key: 'tree', label: '稿件与模板' },
+            { key: 'gate', label: '访问门禁' },
+            { key: 'logs', label: '日志' },
           ]}
         />
         <Button
@@ -117,12 +119,221 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         </Button>
       </Sider>
       <Content style={{ padding: 24 }}>
-        {page === 'users' ? <UsersPage /> : <TreePage />}
+        {page === 'users' ? <UsersPage /> : page === 'tree' ? <TreePage /> : page === 'gate' ? <GatePage /> : <LogsPage />}
         <Text type="secondary" style={{ fontSize: 12 }}>
           服务器版 · 凭证规则 md5(name:secret) · 链接即凭证，外传等于交出账号
         </Text>
       </Content>
     </Layout>
+  )
+}
+
+/* ---------------- 访问门禁设置 ---------------- */
+
+function GatePage() {
+  const { message } = AntApp.useApp()
+  const qc = useQueryClient()
+  const cfg = useQuery({ queryKey: ['admin-gate'], queryFn: adminApi.getGate })
+  const [pwd, setPwd] = useState('')
+  const [minutes, setMinutes] = useState<number | null>(null)
+
+  const save = useMutation({
+    mutationFn: () => {
+      const patch: { password?: string; trialMinutes?: number } = {}
+      if (pwd.trim()) patch.password = pwd.trim()
+      if (minutes != null) patch.trialMinutes = minutes
+      return adminApi.setGate(patch)
+    },
+    onSuccess: (data) => {
+      setPwd('')
+      setMinutes(null)
+      qc.invalidateQueries({ queryKey: ['admin-gate'] })
+      message.success(`已保存（${data.changed.join('、')}），即时生效；改密码会作废所有已发的密码令牌`)
+    },
+    onError: (e: Error) => message.error(e.message),
+  })
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <Card title="访问门禁（裸域名入口）" style={{ marginBottom: 16 }}>
+        <p style={{ color: '#888', fontSize: 13, marginTop: 0 }}>
+          没带个人链接打开网站时需要过这道门：要么限时体验，要么输入这里的密码。改完即时生效，不用重启。
+        </p>
+        {cfg.isLoading ? (
+          <Spin />
+        ) : (
+          <>
+            <p>
+              <Text strong>当前访问密码：</Text>
+              <Text code copyable={{ text: cfg.data?.password }}>{cfg.data?.password}</Text>
+              <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>（发密码给对方 = 允许长期使用，不像个人链接那样隔离数据）</Text>
+            </p>
+            <Space.Compact block style={{ display: 'flex', marginBottom: 12 }}>
+              <Input.Password
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                placeholder="设置新访问密码（至少 6 位，留空=不改）"
+              />
+            </Space.Compact>
+            <p>
+              <Text strong>体验时长：</Text>
+              <InputNumber
+                min={1}
+                max={1440}
+                value={minutes ?? cfg.data?.trialMinutes}
+                onChange={(v) => setMinutes(v)}
+                style={{ width: 100, margin: '0 8px' }}
+              />
+              分钟（改完对下一次「免费体验」生效）
+            </p>
+            <Button type="primary" loading={save.isPending} disabled={!pwd.trim() && minutes == null} onClick={() => save.mutate()}>
+              保存
+            </Button>
+          </>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+/* ---------------- 审计日志 ---------------- */
+
+const EVENT_LABELS: Record<string, { label: string; color: string }> = {
+  gate_trial_start: { label: '开启体验', color: 'blue' },
+  gate_login_ok: { label: '密码进入', color: 'green' },
+  gate_login_fail: { label: '密码错误', color: 'red' },
+  gate_config_changed: { label: '门禁改配置', color: 'purple' },
+  doc_push: { label: '外部推送', color: 'cyan' },
+  doc_shrink_alert: { label: '稿件骤降告警', color: 'volcano' },
+  cred_401: { label: '凭证被拒', color: 'orange' },
+  admin_login_fail: { label: '后台登录失败', color: 'red' },
+}
+
+function LogsPage() {
+  const [event, setEvent] = useState('')
+  const [user, setUser] = useState('')
+  const [days, setDays] = useState(7)
+  const [page, setPage] = useState(1)
+  const [detail, setDetail] = useState<AuditRow | null>(null)
+
+  const logs = useQuery({
+    queryKey: ['admin-logs', event, user, days, page],
+    queryFn: () => adminApi.getLogs({ event, user, days, page }),
+    placeholderData: (prev) => prev,
+  })
+
+  const columns = [
+    { title: '时间', dataIndex: 'at', key: 'at', width: 150, render: fmtTime },
+    {
+      title: '事件',
+      dataIndex: 'event',
+      key: 'event',
+      width: 130,
+      render: (v: string) => {
+        const meta = EVENT_LABELS[v]
+        return <Tag color={meta?.color ?? 'default'}>{meta?.label ?? v}</Tag>
+      },
+    },
+    { title: '用户', dataIndex: 'user', key: 'user', width: 110, render: (v: string) => v || '—' },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', width: 130 },
+    {
+      title: '结果',
+      dataIndex: 'ok',
+      key: 'ok',
+      width: 80,
+      render: (v: boolean) => (v ? <Tag color="green">正常</Tag> : <Tag color="red">异常</Tag>),
+    },
+    {
+      title: '详情',
+      key: 'detail',
+      render: (_: unknown, r: AuditRow) => {
+        const s = JSON.stringify(r.detail)
+        return s === '{}' ? (
+          '—'
+        ) : (
+          <Button size="small" type="link" onClick={() => setDetail(r)}>
+            查看
+          </Button>
+        )
+      },
+    },
+  ]
+
+  return (
+    <div>
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Select
+          value={event}
+          onChange={(v) => {
+            setEvent(v)
+            setPage(1)
+          }}
+          style={{ width: 150 }}
+          options={[
+            { value: '', label: '全部事件' },
+            ...Object.entries(EVENT_LABELS).map(([value, m]) => ({ value, label: m.label })),
+          ]}
+        />
+        <Input
+          value={user}
+          onChange={(e) => {
+            setUser(e.target.value)
+            setPage(1)
+          }}
+          placeholder="按用户筛选"
+          style={{ width: 140 }}
+          allowClear
+        />
+        <Select
+          value={days}
+          onChange={(v) => {
+            setDays(v)
+            setPage(1)
+          }}
+          style={{ width: 110 }}
+          options={[
+            { value: 1, label: '最近 1 天' },
+            { value: 7, label: '最近 7 天' },
+            { value: 30, label: '最近 30 天' },
+          ]}
+        />
+        <Button onClick={() => logs.refetch()} loading={logs.isFetching}>刷新</Button>
+        <Text type="secondary" style={{ fontSize: 12 }}>保留 30 天，自动清理</Text>
+      </Space>
+      <Table
+        rowKey="id"
+        size="middle"
+        loading={logs.isLoading}
+        dataSource={logs.data?.logs ?? []}
+        columns={columns}
+        pagination={{
+          current: page,
+          pageSize: 50,
+          total: logs.data?.total ?? 0,
+          onChange: (p) => setPage(p),
+          showTotal: (t) => `共 ${t} 条`,
+        }}
+      />
+      <Modal title={`详情 · ${EVENT_LABELS[detail?.event ?? '']?.label ?? detail?.event ?? ''}`} open={!!detail} onCancel={() => setDetail(null)} footer={null} width={560}>
+        {detail && (
+          <pre
+            style={{
+              background: '#fafafa',
+              padding: 12,
+              borderRadius: 8,
+              fontSize: 12,
+              lineHeight: 1.6,
+              margin: 0,
+              fontFamily: 'SFMono-Regular, Menlo, Consolas, monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+            }}
+          >
+            {`${fmtTime(detail.at)} · ${detail.user || '—'} · ${detail.ip}\n\n${JSON.stringify(detail.detail, null, 2)}`}
+          </pre>
+        )}
+      </Modal>
+    </div>
   )
 }
 

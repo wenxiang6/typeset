@@ -74,6 +74,28 @@ export interface TreeNode {
   templates: { id: string; name: string; at: number; bytes: number }[]
 }
 
+export interface GateConfig {
+  password: string
+  trialMinutes: number
+}
+
+export interface AuditRow {
+  id: number
+  at: number
+  event: string
+  user: string
+  ip: string
+  ok: boolean
+  detail: Record<string, unknown>
+}
+
+export interface LogsPage {
+  total: number
+  page: number
+  size: number
+  logs: AuditRow[]
+}
+
 /* ---------------- 接口 ---------------- */
 
 export const adminApi = {
@@ -89,6 +111,20 @@ export const adminApi = {
   resetUser: (name: string) =>
     adminClient.Post<Credential>(`/users/${encodeURIComponent(name)}/reset`).send(),
   getTree: () => adminClient.Get<{ ok: boolean; tree: TreeNode[] }>('/tree').send(),
+  getGate: () => adminClient.Get<GateConfig>('/gate').send(),
+  setGate: (patch: { password?: string; trialMinutes?: number }) =>
+    adminClient.Post<{ ok: boolean; changed: string[] }>('/gate', patch).send(),
+  getLogs: (params: { event?: string; user?: string; days?: number; page?: number }) =>
+    adminClient
+      .Get<LogsPage>('/logs', {
+        params: {
+          ...(params.event ? { event: params.event } : {}),
+          ...(params.user ? { user: params.user } : {}),
+          days: params.days ?? 7,
+          page: params.page ?? 1,
+        },
+      })
+      .send(),
   /** 取 JSON 原文（主稿 / 模板）。带 LRU 缓存：命中直接返回；force=true 绕过缓存重新拉 */
   getJsonRaw: async (user: string, target: string, force = false): Promise<string> => {
     const key = `${user}:${target}`

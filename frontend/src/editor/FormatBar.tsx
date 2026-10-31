@@ -5,6 +5,7 @@ import {
   IconAlignCenter, IconAlignJustify, IconAlignLeft, IconAlignRight, IconDownload, IconEraser,
   IconHighlight, IconListOl, IconListUl, IconPrint, IconTextColor,
 } from './icons'
+import { TrialCountdown } from './gateUi'
 
 export function FormatBar({ api }: { api: EditorApi }) {
   const sel = api.selection ? api.findEl(api.selection) : null
@@ -178,6 +179,9 @@ export function FormatBar({ api }: { api: EditorApi }) {
           <IconPrint />
         </button>
       </div>
+
+      {/* 体验模式倒计时（full/无令牌时渲染 null，占最右侧红框位置） */}
+      <TrialCountdown />
     </div>
   )
 }

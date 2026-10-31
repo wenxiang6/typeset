@@ -51,6 +51,9 @@ services:
       COMPUTE_URL: http://compute:9706
       BASE_URL: ${BASE_URL:?请在 .env 里设置 BASE_URL}
       ADMIN_SECRET: ${ADMIN_SECRET:?请在 .env 里设置 ADMIN_SECRET}
+      # 裸域名门禁的首次默认值（之后在 /admin 后台改，存数据库即时生效）
+      GATE_PASSWORD: ${GATE_PASSWORD:-admin123}
+      TRIAL_MINUTES: ${TRIAL_MINUTES:-10}
       DIST_DIR: /srv/dist
     expose:
       - "80" # 由 Caddy 反代到公网；不想用域名时把下面的 9705 映射加回来

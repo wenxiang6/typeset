@@ -20,6 +20,9 @@ class Settings:
     base_url: str = _env("BASE_URL", "http://127.0.0.1:9705")
     # 管理后台密钥（必须设置才能用 /admin）
     admin_secret: str = _env("ADMIN_SECRET", "")
+    # 裸域名门禁：弱密码与体验时长。env 只做首次默认值，之后以 admin 后台的 gate_settings 表为准
+    gate_password: str = _env("GATE_PASSWORD", "admin123")
+    trial_minutes: int = int(_env("TRIAL_MINUTES", "10"))
     # 前端 dist 目录（绝对路径或相对本目录）
     dist_dir: str = _env("DIST_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "dist"))
     # 快照环形上限，与旧版一致

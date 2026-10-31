@@ -18,9 +18,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from sqlalchemy import func, select
 
 from .auth import credential_for, get_session, viewer_url
+from .audit import client_ip, log_event
 from .config import settings
 from .db import SessionLocal
-from .models import Doc, Snapshot, TemplateList, User
+from .gate import _set_setting, gate_password, pw_version, trial_minutes
+from .models import AuditLog, Doc, GateSetting, Snapshot, TemplateList, User
 
 router = APIRouter()
 
@@ -145,6 +147,7 @@ async def admin_login_json(request: Request, body: LoginBody):
     if locked:
         return _json_err(429, f"失败次数过多，锁定中，约 {locked // 60 + 1} 分钟后可再试")
     if not _check_password(request, body.password):
+        await log_event("admin_login_fail", ip=client_ip(request), ok=False)
         return _json_err(401, "密钥不对")
     exp = int(time.time()) + TTL
     resp = JSONResponse({"ok": True})
@@ -186,6 +189,95 @@ async def admin_users_json(request: Request):
     if not _admin_ok(request):
         return _json_err(401, "未登录")
     return {"ok": True, "users": await _list_users()}
+
+
+# ---------------- 访问门禁配置（弱密码 / 体验时长） ----------------
+
+
+class GateBody(BaseModel):
+    password: str | None = None
+    trialMinutes: int | None = None
+
+
+@router.get("/api/admin/gate")
+async def admin_gate_get(request: Request):
+    if not _admin_ok(request):
+        return _json_err(401, "未登录")
+    async with SessionLocal() as s:
+        return {
+            "ok": True,
+            "password": await gate_password(s),
+            "trialMinutes": await trial_minutes(s),
+        }
+
+
+@router.post("/api/admin/gate")
+async def admin_gate_set(request: Request, body: GateBody):
+    if not _admin_ok(request):
+        return _json_err(401, "未登录")
+    changed = []
+    async with SessionLocal() as s:
+        if body.password is not None:
+            pwd = body.password.strip()
+            if len(pwd) < 6:
+                return _json_err(400, "密码至少 6 位")
+            old = await gate_password(s)
+            if pwd != old:
+                await _set_setting(s, "password", pwd)
+                # 版本号 +1：立刻作废所有已签发的 full 门禁令牌
+                await _set_setting(s, "pw_version", str(await pw_version(s) + 1))
+                changed.append("password")
+        if body.trialMinutes is not None:
+            m = int(body.trialMinutes)
+            if not (1 <= m <= 1440):
+                return _json_err(400, "体验时长需在 1~1440 分钟之间")
+            if m != await trial_minutes(s):
+                await _set_setting(s, "trial_minutes", str(m))
+                changed.append("trialMinutes")
+        if changed:
+            await s.commit()
+    if changed:
+        await log_event("gate_config_changed", user="admin", detail={"changed": changed})
+    return {"ok": True, "changed": changed}
+
+
+# ---------------- 审计日志 ----------------
+
+
+@router.get("/api/admin/logs")
+async def admin_logs(
+    request: Request,
+    event: str = "",
+    user: str = "",
+    days: int = 7,
+    page: int = 1,
+):
+    if not _admin_ok(request):
+        return _json_err(401, "未登录")
+    page = max(1, page)
+    size = 50
+    since = int((time.time() - max(1, min(days, 30)) * 86400) * 1000)
+    conds = [AuditLog.at >= since]
+    if event:
+        conds.append(AuditLog.event == event)
+    if user:
+        conds.append(AuditLog.user == user)
+    async with SessionLocal() as s:
+        base = select(AuditLog).where(*conds)
+        total = (await s.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+        rows = (
+            await s.execute(
+                base.order_by(AuditLog.at.desc()).offset((page - 1) * size).limit(size)
+            )
+        ).scalars().all()
+    items = []
+    for r in rows:
+        try:
+            detail = json.loads(r.detail)
+        except Exception:
+            detail = {"raw": r.detail}
+        items.append({"id": r.id, "at": r.at, "event": r.event, "user": r.user, "ip": r.ip, "ok": r.ok, "detail": detail})
+    return {"ok": True, "total": total, "page": page, "size": size, "logs": items}
 
 
 # ---------------- 稿件与模板树 ----------------
@@ -391,6 +483,7 @@ async def admin_login(request: Request):
     if locked:
         return _page("尝试过多", f"<h2>失败次数过多</h2><p>约 {locked // 60 + 1} 分钟后再试。<a href=/admin-legacy>返回</a></p>")
     if not _check_password(request, password):
+        await log_event("admin_login_fail", ip=client_ip(request), ok=False)
         return _page("登录失败", '<h2>密钥不对</h2><p><a href=/admin-legacy>返回重试</a></p>')
     exp = int(time.time()) + TTL
     resp = RedirectResponse("/admin-legacy", status_code=303)

@@ -8,7 +8,9 @@ import { resumeSecretOk } from './resume/secret'
 import { resumeToDoc } from './resume/generator'
 import { RESUME_PLACEHOLDER } from './resume/data'
 import { DOC_KEY } from './editor/autosave'
-import { checkCredentials } from './editor/serverSync'
+import { checkCredentials, currentUserName, serverAvailable } from './editor/serverSync'
+import { getGate, syncRemaining } from './editor/gate'
+import { GatePage, TrialLock } from './editor/gateUi'
 import './styles/resume.css'
 
 const AdminApp = lazy(() => import('./admin/AdminApp'))
@@ -59,52 +61,73 @@ export default function App() {
 }
 
 /**
- * 凭证门卫：URL/本机带的凭证若被服务器明确拒绝（401），整页替换成拦截提示，
- * 不让无效链接继续看到编辑器。放行策略宽松——校验只认 401，
- * 网络抖动/超时（unknown）照常放行，绝不误伤正常用户。
+ * 凭证门卫（三层分流）：
+ * 1. 带 ?u=&k= 个人凭证 → 服务器校验，明确 401 拒绝才拦（网络抖动放行，不误伤）
+ * 2. 无凭证但有门禁令牌（体验/弱密码）→ /api/gate/remaining 校准，被拒则出门禁页
+ * 3. 无凭证无令牌 → 服务器可达时出门禁页；服务器不可达（桌面单机）照旧放行
  */
 function CredGate({ children }: { children: ReactNode }) {
-  const [invalid, setInvalid] = useState(false)
+  const [result, setResult] = useState<'checking' | 'ok' | 'invalid' | 'needGate'>('checking')
   useEffect(() => {
     let on = true
-    void checkCredentials().then((r) => {
-      if (on && r === 'invalid') setInvalid(true)
-    })
+    void (async () => {
+      if (currentUserName()) {
+        const r = await checkCredentials()
+        if (on) setResult(r === 'invalid' ? 'invalid' : 'ok')
+        return
+      }
+      if (getGate()) {
+        const r = await syncRemaining()
+        if (on) setResult(r === 'invalid' ? 'needGate' : 'ok')
+        return
+      }
+      const online = await serverAvailable()
+      if (on) setResult(online ? 'needGate' : 'ok')
+    })()
     return () => {
       on = false
     }
   }, [])
-  if (!invalid) return <>{children}</>
-  return (
-    <div
-      style={{
-        display: 'grid',
-        placeItems: 'center',
-        minHeight: '100vh',
-        background: '#f6f7f9',
-        fontFamily: 'system-ui, sans-serif',
-      }}
-    >
+  if (result === 'needGate') return <GatePage onPass={() => setResult('ok')} />
+  if (result === 'invalid') {
+    return (
       <div
         style={{
-          maxWidth: 420,
-          margin: 16,
-          padding: '32px 28px',
-          background: '#fff',
-          borderRadius: 14,
-          boxShadow: '0 8px 30px rgba(0,0,0,.08)',
-          textAlign: 'center',
+          display: 'grid',
+          placeItems: 'center',
+          minHeight: '100vh',
+          background: '#f6f7f9',
+          fontFamily: 'system-ui, sans-serif',
         }}
       >
-        <div style={{ fontSize: 40, marginBottom: 8 }}>🔒</div>
-        <div style={{ fontSize: 18, fontWeight: 600, color: '#b91c1c', marginBottom: 10 }}>访问链接无效</div>
-        <div style={{ fontSize: 14, lineHeight: 1.7, color: '#4b5563' }}>
-          这个链接里的访问凭证不正确或已被管理员重置。
-          <br />
-          请使用管理员发给你的<strong>完整个人链接</strong>打开，或联系管理员重新获取。
+        <div
+          style={{
+            maxWidth: 420,
+            margin: 16,
+            padding: '32px 28px',
+            background: '#fff',
+            borderRadius: 14,
+            boxShadow: '0 8px 30px rgba(0,0,0,.08)',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 40, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#b91c1c', marginBottom: 10 }}>访问链接无效</div>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: '#4b5563' }}>
+            这个链接里的访问凭证不正确或已被管理员重置。
+            <br />
+            请使用管理员发给你的<strong>完整个人链接</strong>打开，或联系管理员重新获取。
+          </div>
         </div>
       </div>
-    </div>
+    )
+  }
+  // checking / ok：先渲染（checking 期凭证多半没问题，等结果出来再切，别让正常用户白等）
+  return (
+    <>
+      <TrialLock />
+      {children}
+    </>
   )
 }
 

@@ -15,10 +15,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import delete, select
 
 from .admin import router as admin_router
+from .audit import client_ip, log_event
 from .auth import current_user, get_session, viewer_url
 from .compute import forward
 from .config import settings
 from .db import init_db
+from .gate import gate_access, router as gate_router
 from .models import Doc, Snapshot, TemplateList, User
 
 
@@ -32,6 +34,7 @@ app = FastAPI(title="paiban-api", docs_url=None, redoc_url=None, lifespan=_lifes
 # 跨国链路裸传 1.3MB JS 要 20s+；gzip 后 ~300KB。JS/JSON 压缩比高，图片不重复压（sharp 已转 webp）
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
 app.include_router(admin_router)
+app.include_router(gate_router)
 
 
 def _now_ms() -> int:
@@ -84,6 +87,7 @@ async def put_doc(
     push = request.query_params.get("push") == "1"
     now = _now_ms()
     row = await session.get(Doc, user.id)
+    old_len = len(row.raw) if row else 0
     if row:
         row.raw = raw
         row.at = now
@@ -93,6 +97,17 @@ async def put_doc(
         row = Doc(user_id=user.id, raw=raw, at=now, pushed_at=now if push else 0)
         session.add(row)
     await session.commit()
+    if push:
+        await log_event("doc_push", user=user.name, ip=client_ip(request), detail={"bytes": len(raw)})
+    elif old_len > 20000 and len(raw) < old_len * 0.5:
+        # 骤降告警：非推送保存却少了一半以上——「初始模板冲掉真稿」这类事故的指纹
+        await log_event(
+            "doc_shrink_alert",
+            user=user.name,
+            ip=client_ip(request),
+            ok=False,
+            detail={"oldBytes": old_len, "newBytes": len(raw)},
+        )
     out: dict = {"ok": True, "at": now}
     if push:
         out["pushedAt"] = now
@@ -217,7 +232,7 @@ async def put_templates(
 @app.post("/api/elements")
 async def post_elements(
     request: Request,
-    user: User = Depends(current_user),
+    access=Depends(gate_access),
     session=Depends(get_session),
 ) -> Response:
     body = await _read_body(request)
@@ -225,26 +240,27 @@ async def post_elements(
     status, data = await forward("POST", "/api/elements", query=q, content=body,
                                  headers={"content-type": "application/json"})
     doc_raw = data.get("doc") if isinstance(data, dict) else None
-    if status == 200 and isinstance(data, dict) and data.get("ok") and isinstance(doc_raw, str) and doc_raw:
+    # 匿名（门禁令牌）访问：只算不存，个人凭证才落库
+    if status == 200 and isinstance(data, dict) and data.get("ok") and isinstance(doc_raw, str) and doc_raw and access is not None:
         push = q.get("push") != "0"
         now = _now_ms()
-        row = await session.get(Doc, user.id)
+        row = await session.get(Doc, access.id)
         if row:
             row.raw = doc_raw
             row.at = now
             if push:
                 row.pushed_at = now
         else:
-            session.add(Doc(user_id=user.id, raw=doc_raw, at=now, pushed_at=now if push else 0))
+            session.add(Doc(user_id=access.id, raw=doc_raw, at=now, pushed_at=now if push else 0))
         await session.commit()
         data["saved"] = True
         data.pop("doc", None)  # 原始稿只落库，不回传给客户端
-        data["viewerUrl"] = viewer_url(settings.base_url, user.name, user.secret)
+        data["viewerUrl"] = viewer_url(settings.base_url, access.name, access.secret)
     return JSONResponse(status_code=status, content=data)
 
 
 @app.post("/api/layout/validate")
-async def post_validate(request: Request) -> Response:
+async def post_validate(request: Request, access=Depends(gate_access)) -> Response:
     body = await _read_body(request)
     status, data = await forward("POST", "/api/layout/validate", content=body,
                                  headers={"content-type": "application/json"})
@@ -260,7 +276,7 @@ async def format_health() -> Response:
 @app.post("/api/format")
 async def post_format(
     request: Request,
-    user: User = Depends(current_user),
+    access=Depends(gate_access),
     session=Depends(get_session),
 ) -> Response:
     body = await _read_body(request)
@@ -270,19 +286,21 @@ async def post_format(
         headers["x-file-name"] = request.headers["x-file-name"]
     status, data = await forward("POST", "/api/format", query=q, content=body, headers=headers)
     doc_raw = data.get("doc") if isinstance(data, dict) else None
-    if status == 200 and isinstance(data, dict) and data.get("ok") and isinstance(doc_raw, str) and doc_raw:
+    if status == 200 and isinstance(data, dict) and data.get("ok") and isinstance(doc_raw, str) and doc_raw and access is not None:
         now = _now_ms()
-        row = await session.get(Doc, user.id)
+        row = await session.get(Doc, access.id)
         if row:
             row.raw = doc_raw
             row.at = now
             row.pushed_at = now
         else:
-            session.add(Doc(user_id=user.id, raw=doc_raw, at=now, pushed_at=now))
+            session.add(Doc(user_id=access.id, raw=doc_raw, at=now, pushed_at=now))
         await session.commit()
+        await log_event("doc_push", user=access.name, ip=client_ip(request),
+                        detail={"bytes": len(doc_raw), "source": "format"})
         data["saved"] = True
         data.pop("doc", None)
-        data["viewerUrl"] = viewer_url(settings.base_url, user.name, user.secret)
+        data["viewerUrl"] = viewer_url(settings.base_url, access.name, access.secret)
     return JSONResponse(status_code=status, content=data)
 
 
