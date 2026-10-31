@@ -15,6 +15,9 @@ export const adminClient = createAlova({
   requestAdapter: adapterFetch(),
   baseURL: '/api/admin',
   timeout: 15000,
+  // 管理后台要的永远是最新数据：alova 对 GET 默认有 5 分钟内存缓存，
+  // 会导致「刷新/删除后列表纹丝不动」，这里全局关掉，节流交给界面层
+  cacheFor: 0,
   beforeRequest(method) {
     method.config.credentials = 'same-origin'
   },

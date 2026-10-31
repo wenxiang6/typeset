@@ -8,7 +8,7 @@
  * 请求全部走 src/admin/api.ts 的 alova 封装。
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { App as AntApp, Button, Card, Input, InputNumber, Layout, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tree, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { adminApi, type AdminUser, type AuditRow, type Credential, type TreeNode } from './api'
@@ -300,7 +300,7 @@ function LogsPage() {
             { value: 30, label: '最近 30 天' },
           ]}
         />
-        <Button onClick={() => logs.refetch()} loading={logs.isFetching}>刷新</Button>
+        <Button onClick={() => logs.refetch()} loading={logs.isFetching} disabled={logs.isFetching}>刷新</Button>
         <Text type="secondary" style={{ fontSize: 12 }}>保留 30 天，自动清理</Text>
       </Space>
       <Table
@@ -349,11 +349,20 @@ function UsersPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [credential, setCredential] = useState<Credential | null>(null)
+  // 防抖：上一次写操作没落地前，忽略后续点击（防手抖双击重复请求）
+  const busyRef = useRef(false)
+  const guard = <T,>(fn: () => Promise<T>): Promise<T> => {
+    if (busyRef.current) return Promise.reject(new Error('上一步操作还在处理中'))
+    busyRef.current = true
+    return fn().finally(() => {
+      busyRef.current = false
+    })
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin-users'] })
 
   const add = useMutation({
-    mutationFn: () => adminApi.addUser(newName.trim()),
+    mutationFn: () => guard(() => adminApi.addUser(newName.trim())),
     onSuccess: (data) => {
       setCredential(data)
       setAddOpen(false)
@@ -364,7 +373,7 @@ function UsersPage() {
     onError: (e: Error) => message.error(e.message),
   })
   const remove = useMutation({
-    mutationFn: (name: string) => adminApi.deleteUser(name),
+    mutationFn: (name: string) => guard(() => adminApi.deleteUser(name)),
     onSuccess: () => {
       invalidate()
       message.success('已删除（其稿件、快照、模板一并清除）')
@@ -372,7 +381,7 @@ function UsersPage() {
     onError: (e: Error) => message.error(e.message),
   })
   const reset = useMutation({
-    mutationFn: (name: string) => adminApi.resetUser(name),
+    mutationFn: (name: string) => guard(() => adminApi.resetUser(name)),
     onSuccess: (data) => {
       setCredential(data)
       invalidate()
@@ -425,8 +434,8 @@ function UsersPage() {
   return (
     <div>
       <Space style={{ marginBottom: 16 }}>
-        <Button type="primary" onClick={() => setAddOpen(true)}>新增用户</Button>
-        <Button onClick={() => invalidate()} loading={users.isFetching}>刷新</Button>
+        <Button type="primary" onClick={() => setAddOpen(true)} disabled={busyRef.current}>新增用户</Button>
+        <Button onClick={() => invalidate()} loading={users.isFetching} disabled={users.isFetching}>刷新</Button>
       </Space>
       <Table
         rowKey="name"
@@ -588,7 +597,7 @@ function TreePage() {
   return (
     <div>
       <Space style={{ marginBottom: 16 }}>
-        <Button onClick={() => tree.refetch()} loading={tree.isFetching}>刷新</Button>
+        <Button onClick={() => tree.refetch()} loading={tree.isFetching} disabled={tree.isFetching}>刷新</Button>
         <Text type="secondary">每个用户最后一次保存的主稿，及其保存的全部模板；点击查看 JSON 原文。</Text>
       </Space>
       {tree.isLoading ? <Spin /> : <Tree treeData={treeData} defaultExpandAll blockNode onSelect={(_, info) => {
