@@ -92,6 +92,31 @@ export function serverAvailable(): Promise<boolean> {
   return healthPromise
 }
 
+export type CredCheck = 'ok' | 'invalid' | 'unknown'
+let credCheckPromise: Promise<CredCheck> | null = null
+
+/**
+ * 启动时校验凭证（URL ?u=&k= 或本机记住的）。
+ * 只有服务器明确拒绝（401）才算 invalid——跨境链路抖动/超时一律 unknown，
+ * 宁可放行空编辑器也绝不把正常用户挡在门外。
+ */
+export function checkCredentials(): Promise<CredCheck> {
+  if (!credCheckPromise) {
+    credCheckPromise = (async () => {
+      if (!credential()) return 'ok' // 无凭证：单机模式，不拦
+      try {
+        const resp = await fetch(withCred('/api/verify'), { signal: AbortSignal.timeout(10000) })
+        if (resp.ok) return 'ok'
+        if (resp.status === 401) return 'invalid'
+        return 'unknown'
+      } catch {
+        return 'unknown'
+      }
+    })()
+  }
+  return credCheckPromise
+}
+
 async function mirrorPut(path: string, body: string, json = false) {
   try {
     if (!(await serverAvailable())) return
