@@ -59,6 +59,7 @@ export interface AdminUser {
   lastActive: number
   docBytes: number
   snapshots: number
+  viewerUrl: string
 }
 
 export interface Credential {

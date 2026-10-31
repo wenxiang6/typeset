@@ -162,7 +162,7 @@ async def gate_login(request: Request, body: GateLoginBody, s: AsyncSession = De
     pwd = await gate_password(s)
     if not body.password or not hmac.compare_digest(body.password, pwd):
         _fail(request)
-        await log_event("gate_login_fail", ip=ip, ok=False)
+        await log_event("gate_login_fail", ip=ip, ok=False, detail={"reason": "访问密码不正确"})
         return {"ok": False, "error": "访问密码不对"}
     _clear(request)
     ver = await pw_version(s)

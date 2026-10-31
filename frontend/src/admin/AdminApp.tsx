@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react'
-import { App as AntApp, Button, Input, InputNumber, Layout, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tree, Typography } from 'antd'
+import { App as AntApp, Button, Card, Input, InputNumber, Layout, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tree, Typography } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { adminApi, type AdminUser, type AuditRow, type Credential, type TreeNode } from './api'
 
@@ -248,12 +248,15 @@ function LogsPage() {
       key: 'detail',
       render: (_: unknown, r: AuditRow) => {
         const s = JSON.stringify(r.detail)
-        return s === '{}' ? (
-          '—'
-        ) : (
-          <Button size="small" type="link" onClick={() => setDetail(r)}>
-            查看
-          </Button>
+        if (s === '{}') return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        const brief = s.length > 60 ? `${s.slice(0, 60)}…` : s
+        return (
+          <Space size={4}>
+            <Text type="secondary" style={{ fontSize: 12 }}>{brief}</Text>
+            <Button size="small" type="link" onClick={() => setDetail(r)}>
+              全部
+            </Button>
+          </Space>
         )
       },
     },
@@ -380,6 +383,16 @@ function UsersPage() {
 
   const columns = [
     { title: '名字', dataIndex: 'name', key: 'name', defaultSortOrder: 'ascend' as const },
+    {
+      title: '访问链接',
+      dataIndex: 'viewerUrl',
+      key: 'viewerUrl',
+      render: (url: string) => (
+        <Text code copyable={{ text: url, tooltips: ['复制访问链接', '已复制'] }}>
+          复制链接
+        </Text>
+      ),
+    },
     { title: '最后活跃', dataIndex: 'lastActive', key: 'lastActive', render: fmtTime, sorter: (a: AdminUser, b: AdminUser) => a.lastActive - b.lastActive },
     { title: '稿件大小', dataIndex: 'docBytes', key: 'docBytes', render: fmtSize },
     { title: '快照数', dataIndex: 'snapshots', key: 'snapshots' },

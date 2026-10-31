@@ -180,6 +180,7 @@ async def _list_users() -> list[dict]:
             "lastActive": d.at if d else 0,
             "docBytes": len(d.raw) if d else 0,
             "snapshots": snap_counts.get(u.id, 0),
+            "viewerUrl": viewer_url(settings.base_url, u.name, u.secret),
         })
     return out
 

@@ -59,6 +59,12 @@ async def current_user(request: Request, session: AsyncSession = Depends(get_ses
         if u or k:
             from .audit import client_ip, log_event
 
-            await log_event("cred_401", user=u, ip=client_ip(request), ok=False)
+            await log_event(
+                "cred_401",
+                user=u,
+                ip=client_ip(request),
+                ok=False,
+                detail={"path": request.url.path},
+            )
         raise HTTPException(status_code=401, detail="unauthorized")
     return row
