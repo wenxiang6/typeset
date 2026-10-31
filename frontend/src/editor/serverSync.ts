@@ -42,6 +42,26 @@ function credential(): { u: string; k: string } | null {
   return credCache
 }
 
+/** URL 里是否直接带了 ?u=&k=（区别于本机记住的旧凭证） */
+export function hasUrlCredential(): boolean {
+  try {
+    const sp = new URLSearchParams(window.location.search)
+    return Boolean(sp.get('u') && sp.get('k'))
+  } catch {
+    return false
+  }
+}
+
+/** 清掉本机记住的凭证（门卫检测到已失效时调用，让位给门禁页） */
+export function clearSavedCredential() {
+  try {
+    localStorage.removeItem(CRED_KEY)
+  } catch {
+    /* 忽略 */
+  }
+  if (!hasUrlCredential()) credCache = null
+}
+
 /** 凭证 query 片段；没有凭证返回空串 */
 function credQuery(): string {
   const c = credential()
@@ -66,6 +86,9 @@ function withCred(path: string): string {
 let authBannerShown = false
 /** 401：凭证无效或被重置。本地数据不受影响，但不能同步/拉取。 */
 function notifyAuthError() {
+  // 本机记住的凭证失效：由 CredGate 门卫处理（清凭证 → 门禁页），不弹横幅
+  // （横幅只留给「链接里就带着错凭证」的情况——那种该明说链接坏了）
+  if (!hasUrlCredential()) return
   if (authBannerShown) return
   authBannerShown = true
   try {

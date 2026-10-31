@@ -8,7 +8,7 @@ import { resumeSecretOk } from './resume/secret'
 import { resumeToDoc } from './resume/generator'
 import { RESUME_PLACEHOLDER } from './resume/data'
 import { DOC_KEY } from './editor/autosave'
-import { checkCredentials, currentUserName, serverAvailable } from './editor/serverSync'
+import { checkCredentials, clearSavedCredential, currentUserName, hasUrlCredential, serverAvailable } from './editor/serverSync'
 import { getGate, syncRemaining } from './editor/gate'
 import { GatePage, TrialLock } from './editor/gateUi'
 import './styles/resume.css'
@@ -61,19 +61,33 @@ export default function App() {
 }
 
 /**
- * 凭证门卫（三层分流）：
- * 1. 带 ?u=&k= 个人凭证 → 服务器校验，明确 401 拒绝才拦（网络抖动放行，不误伤）
- * 2. 无凭证但有门禁令牌（体验/弱密码）→ /api/gate/remaining 校准，被拒则出门禁页
- * 3. 无凭证无令牌 → 服务器可达时出门禁页；服务器不可达（桌面单机）照旧放行
+ * 凭证门卫（四层分流）：
+ * 1. URL 带 ?u=&k= 个人凭证 → 服务器校验，明确 401 拒绝才拦（网络抖动放行，不误伤）
+ * 2. 无 URL 凭证但本机记住了旧凭证 → 校验；已失效就清掉、转门禁页（不进死胡同）
+ * 3. 无任何凭证但有门禁令牌（体验/弱密码）→ /api/gate/remaining 校准，被拒则出门禁页
+ * 4. 完全无凭证 → 服务器可达时出门禁页；服务器不可达（桌面单机）照旧放行
  */
 function CredGate({ children }: { children: ReactNode }) {
   const [result, setResult] = useState<'checking' | 'ok' | 'invalid' | 'needGate'>('checking')
   useEffect(() => {
     let on = true
     void (async () => {
-      if (currentUserName()) {
+      if (hasUrlCredential()) {
         const r = await checkCredentials()
         if (on) setResult(r === 'invalid' ? 'invalid' : 'ok')
+        return
+      }
+      if (currentUserName()) {
+        // 本机记住的凭证（之前开过个人链接）：失效就清掉换门禁页，有效就照常进
+        const r = await checkCredentials()
+        if (on) {
+          if (r === 'invalid') {
+            clearSavedCredential()
+            setResult('needGate')
+          } else {
+            setResult('ok')
+          }
+        }
         return
       }
       if (getGate()) {
