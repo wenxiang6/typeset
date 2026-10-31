@@ -42,12 +42,16 @@ export function TemplateDialog({ api, open, onClose }: { api: EditorApi; open: b
   if (!open) return null
   const all = [defaultTemplate(), ...saved]
 
+  const finalName = name.trim() || `我的布局 ${new Date().toLocaleDateString('zh-CN')}`
+  const existing = saved.find((x) => x.name === finalName)
+
   const save = async () => {
     setBusy(true)
     setMessage('正在打包图片…')
     const { doc, missing } = await embedTemplateImages(api.doc)
-    const t = makeTemplate(name || `我的布局 ${new Date().toLocaleDateString('zh-CN')}`, doc)
-    const next = [t, ...saved]
+    const t = makeTemplate(finalName, doc)
+    // 同名即覆盖：同一版反复保存只留最新一份，不再需要先删旧的
+    const next = existing ? saved.map((x) => (x.id === existing.id ? { ...t, id: x.id } : x)) : [t, ...saved]
     if (!persistSavedTemplates(next)) {
       setBusy(false)
       setMessage('本地存储空间不足，模板没有保存。可先删除旧模板或减少图片。')
@@ -56,7 +60,11 @@ export function TemplateDialog({ api, open, onClose }: { api: EditorApi; open: b
     setSaved(next)
     setName('')
     setBusy(false)
-    setMessage(missing ? `模板已保存；有 ${missing} 张本地图片无法打包，分享前建议用「选择本地图片」重新插入。` : '模板已保存到本机。')
+    const overwrote = Boolean(existing)
+    setMessage(
+      (overwrote ? `已覆盖同名模板「${finalName}」。` : '模板已保存到本机。') +
+        (missing ? `有 ${missing} 张本地图片无法打包，分享前建议用「选择本地图片」重新插入。` : ''),
+    )
   }
 
   const apply = (t: Template) => {
@@ -125,13 +133,13 @@ export function TemplateDialog({ api, open, onClose }: { api: EditorApi; open: b
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="模板名称，例如：地理周报 · 期中复习"
+            placeholder="模板名称（与已有模板同名则覆盖），例如：地理周报 · 期中复习"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !busy) void save()
             }}
           />
           <button className="primary" disabled={busy} onClick={() => void save()}>
-            {busy ? '处理中…' : '保存当前布局为模板'}
+            {busy ? '处理中…' : existing ? `覆盖模板「${existing.name}」` : '保存当前布局为模板'}
           </button>
         </div>
 
