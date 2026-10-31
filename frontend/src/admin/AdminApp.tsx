@@ -487,6 +487,7 @@ function CredentialModal({ credential, onClose }: { credential: Credential | nul
           '',
           `名字：${credential.name}`,
           `密钥：${credential.secret}`,
+          `访问链接：${credential.viewerUrl}`,
           '',
           '━━ 怎么用 ━━',
           '',
@@ -497,7 +498,7 @@ function CredentialModal({ credential, onClose }: { credential: Credential | nul
           '说「用这个凭证把周刊推送给我」，AI 会自动验证并排版推送，然后把你的版面链接发回来。',
           '',
           '■ 第三步：打开链接看刊物',
-          '在打开的页面可直接微调，点右上角「打印 / 导出 PDF」出 PDF 文件。',
+          '用浏览器打开上面的「访问链接」，可直接微调，点右上角「打印 / 导出 PDF」出 PDF 文件。',
           '',
           '※ 名字 + 密钥只发给你自己的 AI；忘了或泄露了找管理员（宫大人）重置。',
         ].join('\n')
