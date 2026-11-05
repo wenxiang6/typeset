@@ -42,7 +42,7 @@ import {
   snapshotAt,
   writeDoc as writeDocStorage,
 } from './autosave'
-import { fetchServerDocMeta, type ServerDocResult } from './serverSync'
+import { fetchServerDocMeta, currentUserName, type ServerDocResult } from './serverSync'
 import { viewServerOnly } from './viewMode'
 import { hydration } from './hydration'
 import { userKey } from './autosave'
@@ -300,11 +300,15 @@ export function useEditor() {
           localRaw = null
         }
         hydration.set('pending')
+        // 无个人凭证（本地排版工具 / 桌面单机 / 体验模式）：没有「服务器真稿」可冲，
+        // 直接放行。否则本地 vite 探测失败会挂着遮罩把无头浏览器卡死。
+        const hasCred = currentUserName() !== null
 
         // 拉取循环：网络失败且本机没存档时，每 6 秒重试，直到拿到确定态/用户选离线
         let meta: ServerDocResult = 'network'
         for (;;) {
           if (cancelled) return
+          if (!hasCred) break
           meta = await fetchServerDocMeta()
           if (cancelled) return
           if (meta !== 'network') break
@@ -316,7 +320,7 @@ export function useEditor() {
         if (cancelled) return
         hydration.set('done')
 
-        if (typeof meta !== 'object') return // 'network'（本机档离线）或 'empty'（全新账号）：保持初始/本地文档
+        if (!hasCred || typeof meta !== 'object') return // 无凭证/本机档离线/全新账号：保持初始或本地文档
 
         let seen = 0
         try {

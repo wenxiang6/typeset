@@ -108,8 +108,17 @@ function notifyAuthError() {
 /** 服务器持久化是否可用（结果缓存，整个会话只探一次） */
 export function serverAvailable(): Promise<boolean> {
   if (!healthPromise) {
+    // 只看 200 会被 Vite dev server 的 SPA 兜底骗到（/api/health 返回 index.html 也是 200），
+    // 必须校验响应体确实是 {"ok":true}，否则本地排版工具会被误判成「服务器在线」
     healthPromise = fetch('/api/health', { signal: AbortSignal.timeout(3000) })
-      .then((r) => r.ok)
+      .then(async (r) => {
+        if (!r.ok) return false
+        try {
+          return (await r.json()).ok === true
+        } catch {
+          return false
+        }
+      })
       .catch(() => false)
   }
   return healthPromise
