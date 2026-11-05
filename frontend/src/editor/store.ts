@@ -42,7 +42,7 @@ import {
   snapshotAt,
   writeDoc as writeDocStorage,
 } from './autosave'
-import { fetchServerDocMeta, currentUserName, type ServerDocResult } from './serverSync'
+import { fetchServerDocMeta, currentUserName, hasUrlCredential, type ServerDocResult } from './serverSync'
 import { viewServerOnly } from './viewMode'
 import { hydration } from './hydration'
 import { userKey } from './autosave'
@@ -329,24 +329,30 @@ export function useEditor() {
           seen = 0
         }
         const externalPush = meta.pushedAt > seen
-        if (localRaw !== null && !externalPush) return
+        // 个人链接（URL 带 ?u=&k=）：服务器稿永远优先。
+        // 否则「之前打开过旧链接的设备」本地粘着厄尔尼诺模板，AI 推了新稿也不刷新，
+        // 与「推送后别人打开就看到最新」的约定直接冲突。本地稿先打快照兜底再替换。
+        const personalLink = hasUrlCredential()
+        if (localRaw !== null && !externalPush && !personalLink) return
 
         const parsed = JSON.parse(meta.raw) as Doc
         if (!parsed || !Array.isArray(parsed.pages) || !parsed.pages.length) return
 
-        if (externalPush) {
-          // 把用户手上这一版先存成快照，推送不是「不可撤销」的
-          if (localRaw) {
+        if (externalPush || personalLink) {
+          // 把用户手上这一版先存成快照，替换不是「不可撤销」的
+          if (localRaw && localRaw !== meta.raw) {
             try {
               pushSnapshot(localRaw, JSON.parse(localRaw))
             } catch {
               /* 快照失败不影响载入 */
             }
           }
-          try {
-            localStorage.setItem(userKey(PUSH_SEEN_KEY), String(meta.pushedAt))
-          } catch {
-            /* 忽略 */
+          if (externalPush) {
+            try {
+              localStorage.setItem(userKey(PUSH_SEEN_KEY), String(meta.pushedAt))
+            } catch {
+              /* 忽略 */
+            }
           }
         }
 
