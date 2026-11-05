@@ -184,26 +184,33 @@ export interface ServerDocMeta {
  * 读主存档 + 时间戳。
  * pushedAt 用来判断「是否有别处推来的新稿」：编辑器自己的自动保存只更新 at，
  * 只有外部工具推送才会改 pushedAt，所以不会出现自己冲掉自己的情况。
+ *
+ * 三态返回（2026-11-05 起）：'network' = 服务器没应答（超时/断网），
+ * 'empty' = 服务器明确说没有稿；调用方（水合门闩）只有拿到确定态才允许落盘，
+ * 绝不能在「网络失败 + 内存里是初始模板」的状态下解锁自动保存——那会冲掉服务器真稿。
  */
-export async function fetchServerDocMeta(): Promise<ServerDocMeta | null> {
+export type ServerDocResult = ServerDocMeta | 'empty' | 'network'
+
+export async function fetchServerDocMeta(): Promise<ServerDocResult> {
   const cred = credential()
   // TanStack Query 收编：同 key 请求在 staleTime 内去重，编辑器轮询和启动恢复共享缓存
   return queryClient.fetchQuery({
     queryKey: ['server-doc-meta', cred?.u ?? 'anon'],
-    queryFn: async () => {
+    queryFn: async (): Promise<ServerDocResult> => {
       try {
-        if (!(await serverAvailable())) return null
+        const healthy = await serverAvailable()
+        if (!healthy) return 'network'
         const resp = await fetch(withCred('/api/doc'), { signal: AbortSignal.timeout(10000) })
         if (resp.status === 401) {
           notifyAuthError()
-          return null
+          return 'empty'
         }
-        if (!resp.ok) return null
+        if (!resp.ok) return 'network'
         const data = (await resp.json()) as { raw?: string | null; at?: number; pushedAt?: number }
-        if (typeof data.raw !== 'string' || !data.raw) return null
+        if (typeof data.raw !== 'string' || !data.raw) return 'empty'
         return { raw: data.raw, at: Number(data.at ?? 0), pushedAt: Number(data.pushedAt ?? 0) } as ServerDocMeta
       } catch {
-        return null
+        return 'network'
       }
     },
     staleTime: 3000,

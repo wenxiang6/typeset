@@ -10,7 +10,7 @@ import { RESUME_PLACEHOLDER } from './resume/data'
 import { DOC_KEY } from './editor/autosave'
 import { checkCredentials, clearSavedCredential, currentUserName, hasUrlCredential, serverAvailable } from './editor/serverSync'
 import { getGate, syncRemaining } from './editor/gate'
-import { GatePage, TrialLock } from './editor/gateUi'
+import { GatePage, TrialLock, HydratingOverlay } from './editor/gateUi'
 import './styles/resume.css'
 
 const AdminApp = lazy(() => import('./admin/AdminApp'))
@@ -139,6 +139,7 @@ function CredGate({ children }: { children: ReactNode }) {
   // checking / ok：先渲染（checking 期凭证多半没问题，等结果出来再切，别让正常用户白等）
   return (
     <>
+      <HydratingOverlay />
       <TrialLock />
       {children}
     </>

@@ -42,8 +42,9 @@ import {
   snapshotAt,
   writeDoc as writeDocStorage,
 } from './autosave'
-import { fetchServerDocMeta } from './serverSync'
+import { fetchServerDocMeta, type ServerDocResult } from './serverSync'
 import { viewServerOnly } from './viewMode'
+import { hydration } from './hydration'
 import { userKey } from './autosave'
 
 const STORAGE_KEY = userKey(DOC_KEY)
@@ -282,9 +283,14 @@ export function useEditor() {
   //    先把当前本地稿打一份快照兜底，「历史版本」里能退回去；
   // 2. 跨设备恢复（本机没存档而服务器有）→ 换浏览器 / 换电脑时拉回来。
   // 编辑器自己的自动保存只更新服务器时间戳 at，不动 pushedAt，所以不会自己冲掉自己。
+  //
+  // 水合纪律（2026-11-05 事故教训）：只有拿到「确定态」才解锁落盘。
+  // 网络失败 + 本机没存档 = 未定态，此时内存里是初始模板，一旦解锁落盘就会冲掉服务器真稿
+  // ——这种情况显示载入遮罩并重试，等确定态或用户手动选离线。
   useEffect(() => {
     let cancelled = false
     void (async () => {
+      const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms))
       try {
         let localRaw: string | null = null
         try {
@@ -293,9 +299,24 @@ export function useEditor() {
         } catch {
           localRaw = null
         }
+        hydration.set('pending')
 
-        const meta = await fetchServerDocMeta()
-        if (!meta || cancelled) return
+        // 拉取循环：网络失败且本机没存档时，每 6 秒重试，直到拿到确定态/用户选离线
+        let meta: ServerDocResult = 'network'
+        for (;;) {
+          if (cancelled) return
+          meta = await fetchServerDocMeta()
+          if (cancelled) return
+          if (meta !== 'network') break
+          if (localRaw !== null) break // 本机有存档：本机就是主存，离线照常编辑
+          if (hydration.isOfflineRequested()) break // 用户已选离线继续
+          hydration.set('pending')
+          await sleep(6000)
+        }
+        if (cancelled) return
+        hydration.set('done')
+
+        if (typeof meta !== 'object') return // 'network'（本机档离线）或 'empty'（全新账号）：保持初始/本地文档
 
         let seen = 0
         try {
@@ -336,10 +357,11 @@ export function useEditor() {
         lastWrittenRef.current = meta.raw
         setDoc(restored)
       } catch {
-        /* 服务器不可用 / 数据损坏：保持初始文档 */
+        /* 数据损坏等异常：保持初始文档（本机若有存档则仍是本机档，落盘安全） */
       } finally {
-        // 水合完成（无论成败）：此后编辑器的改动才允许落盘/镜像
-        if (!cancelled) hydratedRef.current = true
+        // 水合完成（无论成败）：此后编辑器的改动才允许落盘/镜像。
+        // 网络失败的情况在上面循环里等到了确定态或用户选离线，这里兜底只管异常路径。
+        if (!cancelled && !hydration.isOfflineRequested()) hydration.set('done')
       }
     })()
     return () => {

@@ -11,7 +11,7 @@ import { EditorApp } from './Editor'
 import { fetchServerDocMeta } from './serverSync'
 import { viewServerOnly } from './viewMode'
 
-type State = 'loading' | 'ready' | 'error'
+type State = 'loading' | 'ready' | 'error' | 'empty'
 
 export default function ViewOnlyApp() {
   const [state, setState] = useState<State>('loading')
@@ -21,8 +21,12 @@ export default function ViewOnlyApp() {
     void (async () => {
       const meta = await fetchServerDocMeta()
       if (cancelled) return
-      if (!meta || !meta.raw) {
+      if (meta === 'network') {
         setState('error')
+        return
+      }
+      if (meta === 'empty' || !meta.raw) {
+        setState('empty')
         return
       }
       viewServerOnly.on = true
@@ -37,6 +41,16 @@ export default function ViewOnlyApp() {
     return (
       <div style={centerStyle}>
         <b>正在从服务器读取版面…</b>
+      </div>
+    )
+  }
+  if (state === 'empty') {
+    return (
+      <div style={{ ...centerStyle, maxWidth: 560 }}>
+        <b>这份链接还没有版面</b>
+        <p style={{ lineHeight: 1.8 }}>
+          服务器上还没有推送到这个账号的刊物。请让 AI 排版推送一次，或联系发链接的人确认。
+        </p>
       </div>
     )
   }

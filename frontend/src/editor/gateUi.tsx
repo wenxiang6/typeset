@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { confirmNotice } from './confirmNotice'
 import { clearGate, currentRemaining, getGate, startTrial, gateLogin, syncRemaining, subscribeGate, type GateState } from './gate'
+import { hydration } from './hydration'
 
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60)
@@ -136,6 +137,34 @@ export function TrialCountdown() {
     >
       体验剩余 {fmt(remaining)}
     </span>
+  )
+}
+
+/* ---------------- 水合载入遮罩（拉服务器稿失败时挡住编辑器，防模板冲稿） ---------------- */
+
+export function HydratingOverlay() {
+  const [status, setStatus] = useState(hydration.get())
+  useEffect(() => hydration.subscribe(() => setStatus(hydration.get())), [])
+  if (status !== 'pending') return null
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 99997, background: 'rgba(246,247,249,.96)', display: 'grid', placeItems: 'center', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ maxWidth: 380, margin: 16, padding: '32px 28px', background: '#fff', borderRadius: 14, boxShadow: '0 8px 30px rgba(0,0,0,.12)', textAlign: 'center' }}>
+        <div style={{ fontSize: 36, marginBottom: 10, animation: 'paiban-hydrate-spin 1.6s linear infinite', display: 'inline-block' }}>🔄</div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: '#111', marginBottom: 8 }}>正在从服务器载入你的版面…</div>
+        <div style={{ fontSize: 13, lineHeight: 1.7, color: '#6b7280', marginBottom: 18 }}>
+          网络有点慢，正在自动重试（每 6 秒一次）。
+          <br />
+            为防止覆盖你的正式版面，载入完成前编辑器暂时锁定。
+        </div>
+        <button
+          onClick={() => hydration.requestOffline()}
+          style={{ padding: '8px 18px', fontSize: 13, cursor: 'pointer', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8 }}
+        >
+          离线继续（仅保存在本机）
+        </button>
+      </div>
+      <style>{`@keyframes paiban-hydrate-spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
   )
 }
 
